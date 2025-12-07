@@ -3,15 +3,17 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!;
+const supabaseUrl = process.env.SUPABASE_URL?.trim()!;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY?.trim()!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY?.trim()!;
 
 console.log('Supabase Config Check:', {
   hasUrl: !!supabaseUrl,
   hasAnonKey: !!supabaseAnonKey,
   hasServiceKey: !!supabaseServiceKey,
-  urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 8) : 'N/A'
+  urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 8) : 'N/A',
+  serviceKeyPrefix: supabaseServiceKey ? supabaseServiceKey.substring(0, 5) : 'N/A',
+  serviceKeyLength: supabaseServiceKey ? supabaseServiceKey.length : 0
 });
 
 if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
