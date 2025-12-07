@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabaseAdmin } from '../config/supabase.js';
+import { supabase } from '../config/supabase.js';
 import { optionalAuth } from '../middleware/auth.js';
 import { ApiResponse, Agent } from '../../shared/types.js';
 
