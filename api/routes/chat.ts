@@ -25,7 +25,7 @@ router.post('/stream', authenticateToken, async (req, res) => {
       .from('sessions')
       .select(`
         *,
-        agents!inner(name, system_prompt)
+        agents!inner(id, name, system_prompt, creator_id)
       `)
       .eq('id', sessionId)
       .eq('user_id', userId)
@@ -61,7 +61,25 @@ router.post('/stream', authenticateToken, async (req, res) => {
     }
 
     // 获取AI智能体的系统提示词
-    const systemPrompt = session.agents.system_prompt || '你是一个 helpful AI assistant';
+    let systemPrompt = session.agents.system_prompt || '你是一个 helpful AI assistant';
+
+    // 如果是开发模式且当前用户是创建者，尝试使用最新的草稿或审核中的配置（调试模式）
+    if (session.mode === 'dev' && session.agents.creator_id === userId) {
+      const { data: revision } = await supabaseAdmin
+        .from('agent_revisions')
+        .select('changes')
+        .eq('agent_id', agentId)
+        .in('status', ['draft', 'pending'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (revision && revision.changes && revision.changes.system_prompt) {
+        systemPrompt = revision.changes.system_prompt;
+        // 可以考虑在日志或响应头中标记使用了调试配置
+        console.log(`Using draft/pending prompt for agent ${agentId} (Owner Debug Mode)`);
+      }
+    }
 
     // 获取历史消息用于上下文（排除刚刚插入的当前消息）
     const { data: historyMessages } = await supabaseAdmin

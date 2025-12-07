@@ -103,7 +103,7 @@ router.post('/register', async (req, res) => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, { onConflict: 'id' })
-      .select('id, email, name, created_at, updated_at')
+      .select('id, email, name, role, created_at, updated_at')
       .single();
 
     if (upsertError || !profile) {
@@ -182,7 +182,7 @@ router.post('/login', async (req, res) => {
     // 获取/创建应用侧用户资料
     const { data: userProfile } = await supabaseAdmin
       .from('users')
-      .select('id, email, name, created_at, updated_at')
+      .select('id, email, name, role, created_at, updated_at')
       .eq('id', signInData.user.id)
       .single();
 
@@ -215,7 +215,7 @@ router.post('/login', async (req, res) => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
-        .select('id, email, name, created_at, updated_at')
+        .select('id, email, name, role, created_at, updated_at')
         .single();
 
       if (createError) {
@@ -260,7 +260,7 @@ router.get('/me', authenticateToken, async (req, res) => {
     // 从数据库获取用户信息
     const { data: dbUser, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, name, created_at, updated_at')
+      .select('id, email, name, role, created_at, updated_at')
       .eq('id', userId)
       .single();
 
@@ -303,7 +303,7 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
         updated_at: new Date().toISOString() 
       })
       .eq('id', userId)
-      .select('id, email, name, created_at, updated_at')
+      .select('id, email, name, role, created_at, updated_at')
       .single();
 
     if (error || !user) {

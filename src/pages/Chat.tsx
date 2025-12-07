@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
@@ -10,8 +10,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 const Chat: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const mode = (location.state as { mode?: 'public' | 'dev' })?.mode || 'public';
   const { user } = useAuthStore();
-  const { agents, fetchAgents } = useAgentsStore();
+  const { agents, myAgents, fetchAgents, fetchAgent } = useAgentsStore();
   const { 
     sessions, 
     currentSession, 
@@ -30,16 +32,16 @@ const Chat: React.FC = () => {
 
   const [inputMessage, setInputMessage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [agentRetry, setAgentRetry] = useState(0);
   const [agentLoading, setAgentLoading] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [pendingNew, setPendingNew] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [localAgent, setLocalAgent] = useState<Agent | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const currentAgent = agents.find(agent => agent.id === agentId);
+  const currentAgent = localAgent || agents.find(agent => agent.id === agentId) || myAgents.find(agent => agent.id === agentId);
 
   // 自动滚动到底部
   const scrollToBottom = () => {
@@ -62,7 +64,7 @@ const Chat: React.FC = () => {
       setPendingNew(false);
       setSessionsLoading(true);
       // 获取该智能体的会话列表
-      await fetchSessions(agentId);
+      await fetchSessions(agentId, mode);
       setSessionsLoading(false);
     };
 
@@ -72,18 +74,19 @@ const Chat: React.FC = () => {
     return () => {
       reset();
     };
-  }, [agentId, user, navigate, fetchSessions, clearChat, reset]);
+  }, [agentId, user, navigate, fetchSessions, clearChat, reset, mode]);
 
-  // 当刷新直接进入聊天页且未加载智能体列表时，尝试回退加载
+  // 当刷新直接进入聊天页且未加载智能体列表时，尝试加载智能体详情
   useEffect(() => {
-    if (agentId && !currentAgent && agentRetry < 3 && !agentLoading) {
+    if (agentId && !currentAgent && !agentLoading) {
       setAgentLoading(true);
-      Promise.resolve(fetchAgents()).finally(() => {
-        setAgentLoading(false);
-        setTimeout(() => setAgentRetry(r => r + 1), 500);
-      });
+      fetchAgent(agentId)
+        .then(agent => {
+          if (agent) setLocalAgent(agent);
+        })
+        .finally(() => setAgentLoading(false));
     }
-  }, [agentId, currentAgent, fetchAgents, agentRetry, agentLoading]);
+  }, [agentId, currentAgent, fetchAgent, agentLoading]);
 
   // 监听当前会话变化加载消息（不自动选择最新会话）
   useEffect(() => {
@@ -96,7 +99,7 @@ const Chat: React.FC = () => {
   const handleCreateSession = async () => {
     if (!agentId) return;
     
-    const newSession = await createSession(agentId, `新的对话`);
+    const newSession = await createSession(agentId, `新的对话`, mode);
     if (newSession) {
       setCurrentSession(newSession);
       fetchMessages(newSession.id);
@@ -110,7 +113,7 @@ const Chat: React.FC = () => {
 
     if (!targetSessionId) {
       // 只要没有选中当前会话，发送消息时就自动创建新会话
-      const newSession = await createSession(agentId, `新的对话`);
+      const newSession = await createSession(agentId, `新的对话`, mode);
       if (!newSession) return;
       setCurrentSession(newSession);
       // 新建会话后不需要立即 fetchMessages，因为 sendMessage 会更新本地消息状态
@@ -164,8 +167,15 @@ const Chat: React.FC = () => {
           <p className="text-gray-600 mb-4">若长时间无响应，请点击重试</p>
           <button
             onClick={() => {
-              setAgentRetry(0);
-              fetchAgents();
+              if (agentId) {
+                setAgentLoading(true);
+                fetchAgent(agentId)
+                  .then(agent => {
+                    if (agent) setLocalAgent(agent);
+                  })
+                  .finally(() => setAgentLoading(false));
+                fetchAgents();
+              }
             }}
             className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200"
           >
@@ -190,7 +200,10 @@ const Chat: React.FC = () => {
       <div className={`${sidebarOpen ? 'w-80 md:w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'} transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden fixed md:relative h-full z-20 md:z-auto`}>
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">对话历史</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              对话历史
+              {mode === 'dev' && <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">开发环境</span>}
+            </h2>
             <button
               onClick={() => setSidebarOpen(false)}
               className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
@@ -324,7 +337,13 @@ const Chat: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 md:space-x-4">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => {
+                  if (mode === 'dev') {
+                    navigate('/agents/my');
+                  } else {
+                    navigate('/');
+                  }
+                }}
                 className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -344,7 +363,19 @@ const Chat: React.FC = () => {
                   className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover"
                 />
                 <div>
-                  <h1 className="text-base md:text-lg font-semibold text-gray-900">{currentAgent.name}</h1>
+                  <h1 className="text-base md:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    {currentAgent.name}
+                    {user?.id === currentAgent.creator_id && (
+                      <span className={`px-2 py-0.5 text-xs rounded-full border ${
+                        currentAgent.status === 'private' 
+                          ? 'bg-gray-100 text-gray-700 border-gray-200' 
+                          : 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                      }`}>
+                        {currentAgent.status === 'private' ? '私有' : '我的'}
+                        {(currentAgent as any).draft_revision && ' (调试模式)'}
+                      </span>
+                    )}
+                  </h1>
                   <div className="text-xs md:text-sm text-green-600 flex items-center space-x-1">
                     <span className="w-2 h-2 bg-green-500 rounded-full inline-block" />
                     <span>在线</span>

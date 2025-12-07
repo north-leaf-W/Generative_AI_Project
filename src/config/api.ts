@@ -13,7 +13,12 @@ export const API_ENDPOINTS = {
   },
   agents: {
     list: `${API_BASE_URL}/agents`,
+    my: `${API_BASE_URL}/agents/my`,
+    create: `${API_BASE_URL}/agents`,
     detail: (id: string) => `${API_BASE_URL}/agents/${id}`,
+    pending: `${API_BASE_URL}/agents/pending`,
+    updateStatus: (id: string) => `${API_BASE_URL}/agents/${id}/status`,
+    update: (id: string) => `${API_BASE_URL}/agents/${id}`, // 新增更新接口
   },
   sessions: {
     create: `${API_BASE_URL}/sessions`,
@@ -26,6 +31,10 @@ export const API_ENDPOINTS = {
   chat: {
     stream: `${API_BASE_URL}/chat/stream`,
     history: (sessionId: string) => `${API_BASE_URL}/chat/history/${sessionId}`,
+  },
+  notifications: {
+    list: `${API_BASE_URL}/notifications`,
+    read: (id: string) => `${API_BASE_URL}/notifications/${id}/read`,
   },
 } as const;
 

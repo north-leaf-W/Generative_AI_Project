@@ -11,8 +11,8 @@ interface ChatState {
   error: string | null;
   
   // Actions
-  fetchSessions: (agentId?: string) => Promise<void>;
-  createSession: (agentId: string, title?: string) => Promise<Session | null>;
+  fetchSessions: (agentId?: string, mode?: 'public' | 'dev') => Promise<void>;
+  createSession: (agentId: string, title?: string, mode?: 'public' | 'dev') => Promise<Session | null>;
   fetchMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -41,13 +41,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  fetchSessions: async (agentId?: string) => {
+  fetchSessions: async (agentId?: string, mode?: 'public' | 'dev') => {
     set({ isLoading: true, error: null });
     
     try {
-      const endpoint = agentId 
+      let endpoint = agentId 
         ? API_ENDPOINTS.sessions.agent(agentId)
         : API_ENDPOINTS.sessions.my;
+
+      if (mode) {
+        endpoint += `?mode=${mode}`;
+      }
       
       const response = await apiRequest<ApiResponse<Session[]>>(endpoint, {
         method: 'GET',
@@ -71,13 +75,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createSession: async (agentId: string, title?: string) => {
+  createSession: async (agentId: string, title?: string, mode?: 'public' | 'dev') => {
     set({ isLoading: true, error: null });
     
     try {
       const response = await apiRequest<ApiResponse<Session>>(API_ENDPOINTS.sessions.create, {
         method: 'POST',
-        body: JSON.stringify({ agentId, title }),
+        body: JSON.stringify({ agentId, title, mode }),
       });
 
       if (response.success && response.data) {

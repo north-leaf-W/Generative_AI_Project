@@ -8,7 +8,7 @@ export default defineConfig({
     react({
       babel: {
         plugins: [
-          'react-dev-locator',
+          // 'react-dev-locator',
         ],
       },
     }),

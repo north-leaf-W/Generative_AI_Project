@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth';
-import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { useNotificationsStore } from '@/stores/notifications';
+import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell } from 'lucide-react';
 
 const Profile: React.FC = () => {
   const { user, checkAuth, logout, changePassword, updateProfile, isLoading, error, clearError } = useAuthStore();
+  const { notifications, fetchNotifications, markAsRead, isLoading: notifLoading } = useNotificationsStore();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
@@ -15,7 +17,13 @@ const Profile: React.FC = () => {
   useEffect(() => {
     checkAuth();
     clearError();
-  }, [checkAuth, clearError]);
+    fetchNotifications();
+  }, [checkAuth, clearError, fetchNotifications]);
+
+  const handleMarkAsRead = async (id: string) => {
+    await markAsRead(id);
+  };
+
 
   const onChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +120,11 @@ const Profile: React.FC = () => {
           <div className="flex items-center space-x-2 text-gray-700 h-9">
             <Mail className="w-4 h-4 flex-shrink-0" />
             <span>{user.email}</span>
+            {user.role === 'admin' && (
+              <span className="px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full ml-2">
+                管理员
+              </span>
+            )}
           </div>
         </div>
         <button
@@ -187,6 +200,66 @@ const Profile: React.FC = () => {
               </button>
             </form>
           </div>
+        )}
+      </section>
+
+      {/* 消息中心 */}
+      <section className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+          <Bell className="w-5 h-5 mr-2" />
+          消息中心
+        </h2>
+        
+        {notifications.length > 0 ? (
+          <div className="space-y-4">
+            {notifications.map((notification) => (
+              <div 
+                key={notification.id} 
+                className={`p-4 rounded-lg border transition-colors ${
+                  notification.is_read 
+                    ? 'bg-white border-gray-200' 
+                    : 'bg-blue-50 border-blue-200'
+                }`}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className={`font-medium mb-1 ${notification.is_read ? 'text-gray-900' : 'text-blue-900'}`}>
+                      {notification.title}
+                    </h3>
+                    <p className={`text-sm mb-2 ${notification.is_read ? 'text-gray-500' : 'text-blue-700'}`}>
+                      {notification.content}
+                    </p>
+                    <span className="text-xs text-gray-400">
+                      {new Date(notification.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {!notification.is_read && (
+                    <button
+                      onClick={() => handleMarkAsRead(notification.id)}
+                      className="ml-4 p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                      title="标记为已读"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+           <div className="flex flex-col items-center justify-center py-12 text-gray-500 bg-gray-50 rounded-lg min-h-[200px]">
+             {notifLoading ? (
+               <>
+                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400 mb-3"></div>
+                 <p>加载中...</p>
+               </>
+             ) : (
+               <>
+                 <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                 <p>暂无消息</p>
+               </>
+             )}
+           </div>
         )}
       </section>
     </div>

@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, LogOut, MessageSquare } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth';
+import { useNotificationsStore } from '../../stores/notifications';
 
 const Header: React.FC = () => {
   const { user, logout } = useAuthStore();
+  const { unreadCount, fetchNotifications } = useNotificationsStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+    }
+  }, [user, fetchNotifications]);
 
   const handleLogout = () => {
     logout();
@@ -30,15 +38,36 @@ const Header: React.FC = () => {
               to="/" 
               className="text-gray-600 hover:text-gray-900 transition-colors"
             >
-              智能体
+              智能体广场
             </Link>
             {user && (
-              <Link 
-                to="/profile" 
-                className="text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                个人中心
-              </Link>
+              <>
+                <Link 
+                  to="/agents/my" 
+                  className="text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  我的智能体
+                </Link>
+                {user.role === 'admin' && (
+                  <Link 
+                    to="/admin/agents" 
+                    className="text-gray-600 hover:text-gray-900 transition-colors"
+                  >
+                    管理智能体
+                  </Link>
+                )}
+                <Link 
+                  to="/profile" 
+                  className="text-gray-600 hover:text-gray-900 transition-colors relative"
+                >
+                  个人中心
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-2 min-w-[16px] h-4 bg-red-500 text-white text-xs flex items-center justify-center rounded-full px-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </Link>
+              </>
             )}
           </nav>
 

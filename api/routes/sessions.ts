@@ -8,7 +8,7 @@ const router = express.Router();
 // 创建新会话
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { agentId, title }: CreateSessionRequest = req.body;
+    const { agentId, title, mode = 'public' }: CreateSessionRequest = req.body;
     const userId = req.user!.id;
 
     if (!agentId) {
@@ -43,6 +43,7 @@ router.post('/', authenticateToken, async (req, res) => {
         user_id: userId,
         agent_id: agentId,
         title: sessionTitle,
+        mode,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -76,8 +77,9 @@ router.post('/', authenticateToken, async (req, res) => {
 router.get('/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
+    const mode = (req.query.mode as string) || 'public';
 
-    const { data: sessions, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('sessions')
       .select(`
         *,
@@ -85,7 +87,9 @@ router.get('/my', authenticateToken, async (req, res) => {
       `)
       .eq('user_id', userId)
       .eq('agents.is_active', true)
-      .order('updated_at', { ascending: false });
+      .eq('mode', mode);
+
+    const { data: sessions, error } = await query.order('updated_at', { ascending: false });
 
     if (error) {
       console.error('Database error:', error);
@@ -115,13 +119,16 @@ router.get('/agent/:agentId', authenticateToken, async (req, res) => {
   try {
     const { agentId } = req.params;
     const userId = req.user!.id;
+    const mode = (req.query.mode as string) || 'public';
 
-    const { data: sessions, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('sessions')
       .select('*')
       .eq('user_id', userId)
       .eq('agent_id', agentId)
-      .order('updated_at', { ascending: false });
+      .eq('mode', mode);
+
+    const { data: sessions, error } = await query.order('updated_at', { ascending: false });
 
     if (error) {
       console.error('Database error:', error);
