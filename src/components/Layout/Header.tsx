@@ -1,0 +1,88 @@
+import React from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { User, LogOut, MessageSquare } from 'lucide-react';
+import { useAuthStore } from '../../stores/auth';
+
+const Header: React.FC = () => {
+  const { user, logout } = useAuthStore();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  return (
+    <header className="bg-white shadow-sm border-b border-gray-200">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          {/* Logo */}
+          <Link to="/" className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-xl font-bold text-gray-900">AI对话平台</span>
+          </Link>
+
+          {/* Navigation */}
+          <nav className="hidden md:flex items-center space-x-8">
+            <Link 
+              to="/" 
+              className="text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              智能体
+            </Link>
+            {user && (
+              <Link 
+                to="/profile" 
+                className="text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                个人中心
+              </Link>
+            )}
+          </nav>
+
+          {/* User Actions */}
+          <div className="flex items-center space-x-4">
+            {user ? (
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-medium text-gray-700 hidden sm:block">
+                    {user.name}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:block">退出</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <Link
+                  to="/login"
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  登录
+                </Link>
+                <Link
+                  to="/register"
+                  className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200"
+                >
+                  注册
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default Header;
