@@ -15,10 +15,10 @@ router.get('/', optionalAuth, async (req, res) => {
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.error('Database error:', error);
+      console.error('Database error details:', JSON.stringify(error, null, 2));
       return res.status(500).json({ 
         success: false, 
-        error: 'Failed to fetch agents' 
+        error: `Failed to fetch agents: ${error.message}` 
       });
     }
 
