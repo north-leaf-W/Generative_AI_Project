@@ -8,7 +8,7 @@ const router = express.Router();
 // 获取所有智能体列表
 router.get('/', optionalAuth, async (req, res) => {
   try {
-    const { data: agents, error } = await supabaseAdmin
+    const { data: agents, error } = await supabase
       .from('agents')
       .select('*')
       .eq('is_active', true)
@@ -42,7 +42,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: agent, error } = await supabaseAdmin
+    const { data: agent, error } = await supabase
       .from('agents')
       .select('*')
       .eq('id', id)
