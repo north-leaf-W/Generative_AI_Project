@@ -9,7 +9,7 @@ import { Agent } from '../../shared/types';
 const MyAgents: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { myAgents, isLoading, error, fetchMyAgents, updateAgentStatus } = useAgentsStore();
+  const { myAgents, isLoading, error, fetchMyAgents, updateAgentStatus, updateAgent } = useAgentsStore();
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,8 +24,17 @@ const MyAgents: React.FC = () => {
     if (window.confirm('确定要申请发布该智能体吗？发布后需等待管理员审核。')) {
       setProcessingId(agent.id);
       try {
-        await updateAgentStatus(agent.id, 'public');
-        await fetchMyAgents();
+        // 使用 updateAgent 接口并指定 action 为 'publish'，这样会触发后端的审核流程
+        // 而不是直接调用 updateAgentStatus（该接口仅限管理员使用）
+        const result = await updateAgent(agent.id, {}, 'publish');
+        if (result.success) {
+           await fetchMyAgents();
+        } else {
+           alert(result.message || '发布申请提交失败');
+        }
+      } catch (err) {
+         console.error('Publish error:', err);
+         alert('发布申请提交失败，请重试');
       } finally {
         setProcessingId(null);
       }
