@@ -485,7 +485,8 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       }
     } else {
       // 处理新智能体审核
-      const { data: agent, error } = await supabase
+      // 使用 supabaseAdmin 绕过 RLS 限制
+      const { data: agent, error } = await supabaseAdmin
         .from('agents')
         .update({ status })
         .eq('id', id)
