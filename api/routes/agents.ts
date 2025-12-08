@@ -186,7 +186,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
       return res.status(403).json({ success: false, error: '需要管理员权限' });
     }
 
-    const { data: agents, error } = await supabase
+    const { data: agents, error } = await supabaseAdmin
       .from('agents')
       .select('*, creator:users(name, email)') // 关联查询创建者信息
       .eq('status', 'pending')
@@ -196,7 +196,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
     if (error) throw error;
 
     // 同时获取待审核的修订版本
-    const { data: revisions, error: revisionError } = await supabase
+    const { data: revisions, error: revisionError } = await supabaseAdmin
       .from('agent_revisions')
       .select('*, agent:agents(name, status)')
       .eq('status', 'pending')
@@ -220,7 +220,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
     if (pendingRevisions.length > 0) {
       for (const rev of pendingRevisions) {
          // 这里可以优化查询，暂时循环查
-         const { data: creator } = await supabase.from('users').select('name, email').eq('id', (revisions?.find(r => r.id === rev.revision_id) as any).creator_id).single();
+         const { data: creator } = await supabaseAdmin.from('users').select('name, email').eq('id', (revisions?.find(r => r.id === rev.revision_id) as any).creator_id).single();
          if (creator) rev.creator = creator;
       }
     }
