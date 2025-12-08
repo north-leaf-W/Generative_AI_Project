@@ -54,7 +54,7 @@ router.get('/', optionalAuth, async (req, res) => {
     const isAdmin = userData?.role === 'admin';
 
     // 获取我的智能体
-    const { data: myAgents, error: myError } = await supabase
+    const { data: myAgents, error: myError } = await supabaseAdmin
       .from('agents')
       .select('*')
       .eq('is_active', true)
@@ -108,7 +108,7 @@ router.get('/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
     
-    const { data: agents, error } = await supabase
+    const { data: agents, error } = await supabaseAdmin
       .from('agents')
       .select('*')
       .eq('creator_id', userId)
