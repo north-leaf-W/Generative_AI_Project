@@ -29,8 +29,6 @@ router.get('/', optionalAuth, async (req, res) => {
     // 为了利用 RLS，我们需要传递用户 token，但这里是后端接口
     // 简单的做法是：
     // 1. 查找 status = 'public'
-    // 2. 如果有 userId，查找 creator_id = userId
-    // 3. 合并结果
     
     const { data: publicAgents, error: publicError } = await supabase
       .from('agents')
@@ -43,50 +41,8 @@ router.get('/', optionalAuth, async (req, res) => {
     
     let allAgents = publicAgents || [];
     
-    if (userId) {
-      // 获取用户角色
-    const { data: userData } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', userId)
-      .single();
-    
-    const isAdmin = userData?.role === 'admin';
-
-    // 获取我的智能体
-    const { data: myAgents, error: myError } = await supabaseAdmin
-      .from('agents')
-      .select('*')
-      .eq('is_active', true)
-      .eq('creator_id', userId)
-      .order('created_at', { ascending: false });
-      
-    if (myError) throw myError;
-
-    // 检查我的智能体是否有待审核的修改
-    const myAgentIds = (myAgents || []).map(a => a.id);
-    if (myAgentIds.length > 0) {
-      const { data: revisions } = await supabase
-        .from('agent_revisions')
-        .select('agent_id')
-        .in('agent_id', myAgentIds)
-        .eq('status', 'pending');
-        
-      if (revisions && revisions.length > 0) {
-        const revisionMap = new Set(revisions.map(r => r.agent_id));
-        (myAgents || []).forEach(agent => {
-          if (revisionMap.has(agent.id)) {
-            (agent as any).has_pending_revision = true;
-          }
-        });
-      }
-    }
-    
-    // 合并并去重
-    const publicIds = new Set(allAgents.map(a => a.id));
-    const newMyAgents = (myAgents || []).filter(a => !publicIds.has(a.id));
-    allAgents = [...newMyAgents, ...allAgents];
-  }
+    // 智能体广场只显示已发布的智能体，不需要合并“我的智能体”
+    // "我的智能体"在单独的页面显示
 
   const response: ApiResponse<Agent[]> = {
       success: true,
