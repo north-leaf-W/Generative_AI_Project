@@ -6,6 +6,8 @@ import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
 import { Agent, Session, Message } from '../../shared/types';
 import { AnimatePresence, motion } from 'framer-motion';
+import PixelAgents from '../components/PixelAgents';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const Chat: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
@@ -187,20 +189,20 @@ const Chat: React.FC = () => {
   }
 
   return (
-    <div className="h-screen bg-gray-50 flex">
+    <div className="h-screen bg-transparent flex overflow-hidden">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-10 md:hidden"
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm z-10 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
       
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-80 md:w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'} transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden fixed md:relative h-full z-20 md:z-auto`}>
-        <div className="p-4 border-b border-gray-200">
+      <div className={`${sidebarOpen ? 'w-80 md:w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'} transition-all duration-300 glass border-r border-white/20 flex flex-col overflow-hidden fixed md:relative h-full z-20 md:z-auto`}>
+        <div className="p-4 border-b border-gray-200/50">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-800">
               对话历史
               {mode === 'dev' && <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">开发环境</span>}
             </h2>
@@ -243,8 +245,8 @@ const Chat: React.FC = () => {
                     exit={{ opacity: 0, x: -20, transition: { duration: 0.2 } }}
                     className={`p-2 md:p-3 rounded-lg cursor-pointer transition-colors group ${
                       currentSession?.id === session.id
-                        ? 'bg-blue-50 border border-blue-200'
-                        : 'hover:bg-gray-50'
+                        ? 'bg-blue-50/80 border border-blue-200/50 shadow-sm'
+                        : 'hover:bg-gray-50/50'
                     }`}
                     onClick={() => {
                       setPendingNew(false);
@@ -284,61 +286,27 @@ const Chat: React.FC = () => {
       </div>
 
       {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {deleteConfirmation && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black bg-opacity-50"
-              onClick={() => setDeleteConfirmation(null)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative z-10 overflow-hidden"
-            >
-              <div className="flex items-center space-x-3 mb-4 text-red-600">
-                <div className="p-2 bg-red-100 rounded-full">
-                  <AlertCircle className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">删除会话</h3>
-              </div>
-              
-              <p className="text-gray-600 mb-6">
-                确定要删除这个会话吗？删除后该会话的所有消息记录将无法恢复。
-              </p>
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setDeleteConfirmation(null)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm"
-                >
-                  确认删除
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ConfirmationModal
+        isOpen={!!deleteConfirmation}
+        onClose={() => setDeleteConfirmation(null)}
+        onConfirm={confirmDelete}
+        title="删除会话"
+        message="确定要删除这个会话吗？删除后该会话的所有消息记录将无法恢复。"
+        type="danger"
+        confirmText="确认删除"
+      />
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Chat Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 md:px-6 md:py-4">
+        <div className="glass border-b border-white/20 px-4 py-3 md:px-6 md:py-4 z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 md:space-x-4">
               <button
                 onClick={() => {
-                  if (mode === 'dev') {
+                  if (location.state?.from) {
+                    navigate(location.state.from);
+                  } else if (mode === 'dev') {
                     navigate('/agents/my');
                   } else {
                     navigate('/');
@@ -432,14 +400,14 @@ const Chat: React.FC = () => {
                     <div className={`flex-1 ${
                       message.role === 'user' ? 'text-right' : 'text-left'
                     }`}>
-                      <div className={`inline-block px-3 py-2 md:px-4 md:py-2 rounded-2xl ${
+                      <div className={`inline-block px-4 py-3 rounded-2xl shadow-sm ${
                         message.role === 'user'
-                          ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white'
-                          : 'bg-gray-100 text-gray-900'
+                          ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none'
+                          : 'bg-white text-gray-800 rounded-bl-none border border-gray-100'
                       }`}>
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{message.content}</p>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-gray-400 mt-1.5 px-1">
                         {formatTime(message.created_at)}
                       </p>
                     </div>
@@ -474,28 +442,38 @@ const Chat: React.FC = () => {
         </div>
 
         {/* Input Area */}
-        <div className="bg-white border-t border-gray-200 px-4 py-3 md:px-6 md:py-4">
-          <div className="flex items-end space-x-2 md:space-x-4">
-            <div className="flex-1">
-              <textarea
-                ref={inputRef}
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="输入您的消息..."
-                disabled={isStreaming}
-                className="w-full px-3 py-2 md:px-4 md:py-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 text-sm md:text-base"
-                rows={1}
-                style={{ minHeight: '40px', maxHeight: '100px' }}
-              />
+        <div className="px-4 py-4 md:px-6 md:py-6 w-full max-w-4xl mx-auto">
+          <div className="relative">
+            {/* Pixel Agents */}
+            <div className="absolute -top-14 left-4 z-10 pointer-events-none">
+              <PixelAgents />
             </div>
-            <button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || isStreaming}
-              className="px-3 py-2 md:px-4 md:py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex-shrink-0"
-            >
-              <Send className="w-4 h-4 md:w-5 md:h-5" />
-            </button>
+
+            <div className="bg-white rounded-[2rem] shadow-xl border border-white/50 p-2 flex items-end space-x-2 transition-all hover:shadow-2xl relative z-20">
+              <div className="flex-1">
+                <textarea
+                  ref={inputRef}
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="和 Agent 一起开始你的工作..."
+                  disabled={isStreaming}
+                  className="w-full px-4 py-3 bg-transparent border-none focus:ring-0 resize-none text-gray-800 placeholder-gray-400 text-base min-h-[56px] max-h-[200px]"
+                  rows={1}
+                />
+              </div>
+              <button
+                onClick={handleSendMessage}
+                disabled={!inputMessage.trim() || isStreaming}
+                className="p-3 bg-gray-900 text-white rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex-shrink-0 mb-1 mr-1"
+              >
+                {isStreaming ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Send className="w-5 h-5" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

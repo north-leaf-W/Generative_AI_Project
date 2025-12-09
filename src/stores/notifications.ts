@@ -12,6 +12,7 @@ interface NotificationsState {
   // Actions
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: string) => Promise<boolean>;
+  markAllAsRead: () => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -77,6 +78,27 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
       return false;
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
+      return false;
+    }
+  },
+
+  markAllAsRead: async () => {
+    try {
+      const response = await apiRequest(API_ENDPOINTS.notifications.readAll, {
+        method: 'PATCH',
+      });
+
+      if (response.success) {
+        const notifications = get().notifications.map(n => ({ ...n, is_read: true }));
+        set({ 
+          notifications,
+          unreadCount: 0
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
       return false;
     }
   },

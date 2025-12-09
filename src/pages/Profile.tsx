@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
-import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell } from 'lucide-react';
+import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell, RefreshCcw, CheckCheck } from 'lucide-react';
 
 const Profile: React.FC = () => {
   const { user, checkAuth, logout, changePassword, updateProfile, isLoading, error, clearError } = useAuthStore();
-  const { notifications, fetchNotifications, markAsRead, isLoading: notifLoading } = useNotificationsStore();
+  const { notifications, fetchNotifications, markAsRead, markAllAsRead, isLoading: notifLoading } = useNotificationsStore();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
@@ -205,10 +205,29 @@ const Profile: React.FC = () => {
 
       {/* 消息中心 */}
       <section className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-          <Bell className="w-5 h-5 mr-2" />
-          消息中心
-        </h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+            <Bell className="w-5 h-5 mr-2" />
+            消息中心
+          </h2>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => fetchNotifications()}
+              className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="刷新消息"
+            >
+              <RefreshCcw className={`w-4 h-4 ${notifLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => markAllAsRead()}
+              className="flex items-center space-x-1 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="全部已读"
+            >
+              <CheckCheck className="w-4 h-4" />
+              <span className="hidden sm:inline">全部已读</span>
+            </button>
+          </div>
+        </div>
         
         {notifications.length > 0 ? (
           <div className="space-y-4">

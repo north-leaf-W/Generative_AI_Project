@@ -155,7 +155,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
           error: null
         });
         // 重新获取我的智能体
-        get().fetchMyAgents();
+        await get().fetchMyAgents();
         return { success: true, message: response.message };
       } else {
         throw new Error(response.error || 'Failed to update agent');

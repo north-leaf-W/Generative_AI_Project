@@ -5,12 +5,26 @@ import { useAuthStore } from '../stores/auth';
 import { useAgentsStore } from '../stores/agents';
 import AgentCard from '../components/AgentCard';
 import { Agent } from '../../shared/types';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const MyAgents: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const { myAgents, isLoading, error, fetchMyAgents, updateAgentStatus, updateAgent } = useAgentsStore();
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info' | 'success';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'warning',
+    onConfirm: () => {},
+  });
 
   useEffect(() => {
     if (!user) {
@@ -20,37 +34,49 @@ const MyAgents: React.FC = () => {
     fetchMyAgents();
   }, [user, navigate, fetchMyAgents]);
 
-  const handlePublish = async (agent: Agent) => {
-    if (window.confirm('确定要申请发布该智能体吗？发布后需等待管理员审核。')) {
-      setProcessingId(agent.id);
-      try {
-        // 使用 updateAgent 接口并指定 action 为 'publish'，这样会触发后端的审核流程
-        // 而不是直接调用 updateAgentStatus（该接口仅限管理员使用）
-        const result = await updateAgent(agent.id, {}, 'publish');
-        if (result.success) {
-           await fetchMyAgents();
-        } else {
-           alert(result.message || '发布申请提交失败');
+  const handlePublish = (agent: Agent) => {
+    setModalConfig({
+      isOpen: true,
+      title: '申请发布',
+      message: '确定要申请发布该智能体吗？发布后需等待管理员审核。',
+      type: 'info',
+      onConfirm: async () => {
+        setProcessingId(agent.id);
+        try {
+          // 使用 updateAgent 接口并指定 action 为 'publish'，这样会触发后端的审核流程
+          // 而不是直接调用 updateAgentStatus（该接口仅限管理员使用）
+          const result = await updateAgent(agent.id, {}, 'publish');
+          if (result.success) {
+             await fetchMyAgents();
+          } else {
+             alert(result.message || '发布申请提交失败');
+          }
+        } catch (err) {
+           console.error('Publish error:', err);
+           alert('发布申请提交失败，请重试');
+        } finally {
+          setProcessingId(null);
         }
-      } catch (err) {
-         console.error('Publish error:', err);
-         alert('发布申请提交失败，请重试');
-      } finally {
-        setProcessingId(null);
-      }
-    }
+      },
+    });
   };
 
-  const handleTakeDown = async (agent: Agent) => {
-    if (window.confirm('确定要下架该智能体吗？下架后其他用户将无法看到。')) {
-      setProcessingId(agent.id);
-      try {
-        await updateAgentStatus(agent.id, 'private');
-        await fetchMyAgents();
-      } finally {
-        setProcessingId(null);
-      }
-    }
+  const handleTakeDown = (agent: Agent) => {
+    setModalConfig({
+      isOpen: true,
+      title: '确认下架',
+      message: '确定要下架该智能体吗？下架后其他用户将无法看到。',
+      type: 'warning',
+      onConfirm: async () => {
+        setProcessingId(agent.id);
+        try {
+          await updateAgentStatus(agent.id, 'private');
+          await fetchMyAgents();
+        } finally {
+          setProcessingId(null);
+        }
+      },
+    });
   };
 
   if (isLoading && myAgents.length === 0) {
@@ -209,6 +235,15 @@ const MyAgents: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+      />
     </div>
   );
 };

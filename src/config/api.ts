@@ -35,6 +35,7 @@ export const API_ENDPOINTS = {
   notifications: {
     list: `${API_BASE_URL}/notifications`,
     read: (id: string) => `${API_BASE_URL}/notifications/${id}/read`,
+    readAll: `${API_BASE_URL}/notifications/read-all`,
   },
 } as const;
 

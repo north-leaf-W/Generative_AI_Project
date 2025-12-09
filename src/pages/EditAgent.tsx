@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Bot, Upload, Loader2, ImageIcon, ArrowLeft, Save, Send, CheckCircle } from 'lucide-react';
 import { useAgentsStore } from '../stores/agents';
 import { Agent } from '../../shared/types';
 import { supabase } from '../lib/utils';
 import { useAuthStore } from '../stores/auth';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 interface EditAgentFormData {
   name: string;
@@ -17,6 +18,10 @@ interface EditAgentFormData {
 const EditAgent: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const readonly = location.state?.readonly;
+  const from = location.state?.from;
+  
   const { user } = useAuthStore();
   const { fetchAgent, updateAgent, isLoading, error } = useAgentsStore();
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -43,7 +48,7 @@ const EditAgent: React.FC = () => {
         const agent = await fetchAgent(id);
         if (agent) {
           // Check permission
-          if (user && agent.creator_id !== user.id) {
+          if (user && agent.creator_id !== user.id && !(user.role === 'admin' && readonly)) {
             navigate('/agents/my');
             return;
           }
@@ -122,6 +127,23 @@ const EditAgent: React.FC = () => {
 
   const [actionType, setActionType] = useState<'save' | 'publish'>('save');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info' | 'success';
+    confirmText?: string;
+    showCancel?: boolean;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'success',
+    confirmText: '确认',
+    showCancel: true,
+    onConfirm: () => {},
+  });
 
   const onSubmit = async (data: EditAgentFormData) => {
     if (!id) return;
@@ -133,9 +155,18 @@ const EditAgent: React.FC = () => {
     if (result.success) {
       if (actionType === 'publish') {
          if (result.message) {
-           alert(result.message);
+           setModalConfig({
+             isOpen: true,
+             title: '提交成功',
+             message: result.message,
+             type: 'success',
+             confirmText: '知道了',
+             showCancel: false,
+             onConfirm: () => navigate('/agents/my'),
+           });
+         } else {
+           navigate('/agents/my');
          }
-         navigate('/agents/my');
       } else {
          // 保存成功，显示动画
          setSaveSuccess(true);
@@ -176,11 +207,11 @@ const EditAgent: React.FC = () => {
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         <button
-          onClick={() => navigate('/agents/my')}
+          onClick={() => navigate(from || '/agents/my')}
           className="mb-6 flex items-center text-gray-600 hover:text-gray-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4 mr-1" />
-          返回我的智能体
+          {from?.includes('admin') ? '返回管理后台' : '返回我的智能体'}
         </button>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -216,6 +247,7 @@ const EditAgent: React.FC = () => {
                 }`}
                 placeholder="例如：翻译助手"
                 {...register('name', { required: '请输入智能体名称' })}
+                disabled={readonly}
               />
               {errors.name && (
                 <p className="mt-1 text-sm text-red-500">{errors.name.message}</p>
@@ -233,6 +265,7 @@ const EditAgent: React.FC = () => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 placeholder="简要描述这个智能体的功能..."
                 {...register('description')}
+                disabled={readonly}
               />
             </div>
 
@@ -261,7 +294,7 @@ const EditAgent: React.FC = () => {
                   <div className="flex items-center space-x-3">
                     <label 
                       htmlFor="avatar-upload" 
-                      className={`inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer transition-colors ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer transition-colors ${uploading || readonly ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <Upload className="w-4 h-4 mr-2" />
                       上传图片
@@ -271,14 +304,15 @@ const EditAgent: React.FC = () => {
                         accept="image/*"
                         className="sr-only"
                         onChange={handleFileUpload}
-                        disabled={uploading}
+                        disabled={uploading || readonly}
                       />
                     </label>
                     <span className="text-gray-400 text-sm">或</span>
                     <button
                       type="button"
                       onClick={() => setValue('avatar_url', `https://api.dicebear.com/7.x/bottts/svg?seed=${Math.random().toString(36)}`)}
-                      className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                      className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={readonly}
                     >
                       随机生成
                     </button>
@@ -291,9 +325,10 @@ const EditAgent: React.FC = () => {
                     </div>
                     <input
                       type="text"
-                      className="block w-full pl-10 sm:text-sm border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="block w-full pl-10 sm:text-sm border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                       placeholder="或者直接输入图片 URL"
                       {...register('avatar_url')}
+                      disabled={readonly}
                     />
                   </div>
                   <p className="text-xs text-gray-500">
@@ -317,6 +352,7 @@ const EditAgent: React.FC = () => {
                   }`}
                   placeholder="你是一个专业的翻译助手，请将用户输入的中文翻译成英文..."
                   {...register('system_prompt', { required: '请输入系统提示词' })}
+                  disabled={readonly}
                 />
               </div>
               <p className="mt-1 text-xs text-gray-500">
@@ -330,49 +366,64 @@ const EditAgent: React.FC = () => {
             <div className="pt-6 flex items-center justify-end gap-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => navigate('/agents/my')}
+                onClick={() => navigate(from || '/agents/my')}
                 className="px-6 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
               >
-                取消
+                {readonly ? '返回' : '取消'}
               </button>
               
-              <button
-                type="submit"
-                disabled={isLoading}
-                onClick={() => setActionType('save')}
-                className={`flex items-center px-6 py-2 border rounded-lg font-medium transition-all duration-200 shadow-sm ${
-                  saveSuccess 
-                    ? 'bg-green-50 text-green-700 border-green-200' 
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {isLoading && actionType === 'save' ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : saveSuccess ? (
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                ) : (
-                  <Save className="w-4 h-4 mr-2" />
-                )}
-                {saveSuccess ? '已保存' : '保存修改'}
-              </button>
+              {!readonly && (
+                <>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    onClick={() => setActionType('save')}
+                    className={`flex items-center px-6 py-2 border rounded-lg font-medium transition-all duration-200 shadow-sm ${
+                      saveSuccess 
+                        ? 'bg-green-50 text-green-700 border-green-200' 
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {isLoading && actionType === 'save' ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : saveSuccess ? (
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                    ) : (
+                      <Save className="w-4 h-4 mr-2" />
+                    )}
+                    {saveSuccess ? '已保存' : '保存修改'}
+                  </button>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                onClick={() => setActionType('publish')}
-                className="flex items-center px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
-              >
-                {isLoading && actionType === 'publish' ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4 mr-2" />
-                )}
-                {isPublic ? '提交审核' : '发布'}
-              </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    onClick={() => setActionType('publish')}
+                    className="flex items-center px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                  >
+                    {isLoading && actionType === 'publish' ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mr-2" />
+                    )}
+                    {isPublic ? '提交审核' : '发布'}
+                  </button>
+                </>
+              )}
             </div>
           </form>
         </div>
       </div>
+      
+      <ConfirmationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        confirmText={modalConfig.confirmText}
+        showCancel={modalConfig.showCancel}
+      />
     </div>
   );
 };

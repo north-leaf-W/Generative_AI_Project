@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, CheckCircle, XCircle, Loader2, RefreshCw, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { ShieldCheck, CheckCircle, XCircle, Loader2, RefreshCw, AlertTriangle, MessageSquare, FileText, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useAgentsStore } from '../stores/agents';
 import { Agent } from '../../shared/types';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const AdminAgents: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +21,19 @@ const AdminAgents: React.FC = () => {
   } = useAgentsStore();
   
   const [activeTab, setActiveTab] = useState<'pending' | 'manage'>('pending');
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info' | 'success';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'warning',
+    onConfirm: () => {},
+  });
 
   useEffect(() => {
     if (!user) {
@@ -35,32 +49,47 @@ const AdminAgents: React.FC = () => {
     fetchAgents();
   }, [user, navigate, fetchPendingAgents, fetchAgents, clearError]);
 
-  const handleApprove = async (agent: Agent) => {
+  const handleApprove = (agent: Agent) => {
     const isRevision = (agent as any).status === 'pending_revision';
     const revisionId = (agent as any).revision_id;
-    const confirmMsg = isRevision ? '确认通过该修改申请？' : '确认发布该智能体？';
     
-    if (window.confirm(confirmMsg)) {
-      await updateAgentStatus(agent.id, 'public', isRevision, revisionId);
-    }
+    setModalConfig({
+      isOpen: true,
+      title: isRevision ? '确认通过修改' : '确认发布智能体',
+      message: isRevision ? '确认通过该智能体的修改申请？修改将立即生效。' : '确认通过该智能体的发布申请？通过后将显示在广场。',
+      type: 'success',
+      onConfirm: async () => {
+        await updateAgentStatus(agent.id, 'public', isRevision, revisionId);
+      },
+    });
   };
 
-  const handleReject = async (agent: Agent) => {
+  const handleReject = (agent: Agent) => {
     const isRevision = (agent as any).status === 'pending_revision';
     const revisionId = (agent as any).revision_id;
-    const confirmMsg = isRevision ? '确认拒绝该修改申请？' : '确认拒绝并转为私有？';
 
-    if (window.confirm(confirmMsg)) {
-      await updateAgentStatus(agent.id, 'private', isRevision, revisionId);
-    }
+    setModalConfig({
+      isOpen: true,
+      title: isRevision ? '确认拒绝修改' : '确认拒绝申请',
+      message: isRevision ? '确认拒绝该修改申请？' : '确认拒绝并转为私有状态？',
+      type: 'danger',
+      onConfirm: async () => {
+        await updateAgentStatus(agent.id, 'private', isRevision, revisionId);
+      },
+    });
   };
 
-  const handleTakeDown = async (id: string) => {
-    if (window.confirm('确认下架该智能体？用户将无法在广场看到它。')) {
-      await updateAgentStatus(id, 'private');
-      // 刷新列表
-      fetchAgents();
-    }
+  const handleTakeDown = (id: string) => {
+    setModalConfig({
+      isOpen: true,
+      title: '确认下架',
+      message: '确认下架该智能体？下架后用户将无法在广场看到它，但持有者仍可在"我的智能体"中看到。',
+      type: 'warning',
+      onConfirm: async () => {
+        await updateAgentStatus(id, 'private');
+        fetchAgents();
+      },
+    });
   };
 
   if (isLoading && pendingAgents.length === 0 && agents.length === 0) {
@@ -221,13 +250,20 @@ const AdminAgents: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2">
                          <button
-                          onClick={() => navigate(`/chat/${agent.id}`)}
-                          className="text-gray-400 hover:text-gray-600"
+                          onClick={() => navigate(`/chat/${agent.id}`, { state: { from: '/admin/agents' } })}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="进入对话"
+                        >
+                          <MessageSquare className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => navigate(`/agents/edit/${agent.id}`, { state: { from: '/admin/agents', readonly: true } })}
+                          className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                           title="查看详情"
                         >
-                          <Eye className="w-5 h-5" />
+                          <FileText className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => handleTakeDown(agent.id)}
@@ -245,6 +281,15 @@ const AdminAgents: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+      />
     </div>
   );
 };

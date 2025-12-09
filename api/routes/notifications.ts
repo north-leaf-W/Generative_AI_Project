@@ -58,6 +58,31 @@ router.patch('/:id/read', authenticateToken, async (req, res) => {
   }
 });
 
+// 标记所有通知为已读
+router.patch('/read-all', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+
+    if (error) throw error;
+
+    res.json({
+      success: true
+    });
+  } catch (error: any) {
+    console.error('Mark all notifications read error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // 内部帮助函数：发送通知 (不通过 HTTP 暴露，但在同一文件中导出供其他模块使用)
 export const sendNotification = async (userId: string, type: 'system' | 'audit_approved' | 'audit_rejected', title: string, content: string) => {
   try {

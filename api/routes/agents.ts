@@ -154,6 +154,25 @@ router.post('/', authenticateToken, async (req, res) => {
 
     if (error) throw error;
 
+    // 如果状态为 pending (待审核)，通知所有管理员
+    if (finalStatus === 'pending') {
+      const { data: admins } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('role', 'admin');
+        
+      if (admins && admins.length > 0) {
+        for (const admin of admins) {
+          await sendNotification(
+            admin.id,
+            'system',
+            '新智能体待审核',
+            `用户提交了新的智能体 "${name}" 申请发布，请前往后台审核。`
+          );
+        }
+      }
+    }
+
     const response: ApiResponse<Agent> = {
       success: true,
       data: data
@@ -356,6 +375,13 @@ router.patch('/:id', authenticateToken, async (req, res) => {
             .eq('id', existingRevision.id);
             
            if (newStatus === 'pending') {
+             // 通知管理员
+             const { data: admins } = await supabaseAdmin.from('users').select('id').eq('role', 'admin');
+             if (admins) {
+               for (const admin of admins) {
+                 await sendNotification(admin.id, 'system', '智能体修改待审核', `用户提交了智能体 "${currentAgent.name}" 的修改申请，请前往后台审核。`);
+               }
+             }
              return res.json({ success: true, message: '修改已提交审核' });
            } else {
              return res.json({ success: true, message: '修改已保存为草稿' });
@@ -372,6 +398,13 @@ router.patch('/:id', authenticateToken, async (req, res) => {
             });
             
            if (revisionStatus === 'pending') {
+             // 通知管理员
+             const { data: admins } = await supabaseAdmin.from('users').select('id').eq('role', 'admin');
+             if (admins) {
+               for (const admin of admins) {
+                 await sendNotification(admin.id, 'system', '智能体修改待审核', `用户提交了智能体 "${currentAgent.name}" 的修改申请，请前往后台审核。`);
+               }
+             }
              return res.json({ success: true, message: '修改已提交审核' });
            } else {
              return res.json({ success: true, message: '修改已保存为草稿' });
@@ -401,6 +434,13 @@ router.patch('/:id', authenticateToken, async (req, res) => {
         if (updateError) throw updateError;
         
         if (updateData.status === 'pending') {
+          // 通知管理员
+          const { data: admins } = await supabaseAdmin.from('users').select('id').eq('role', 'admin');
+          if (admins) {
+            for (const admin of admins) {
+              await sendNotification(admin.id, 'system', '新智能体待审核', `用户提交了智能体 "${updatedAgent.name}" 申请发布，请前往后台审核。`);
+            }
+          }
           return res.json({ success: true, message: '智能体已提交审核', data: updatedAgent });
         }
         
@@ -484,7 +524,16 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
          return res.json({ success: true, message: '审核已拒绝' });
       }
     } else {
-      // 处理新智能体审核
+      // 处理普通状态更新 (发布/拒绝/下架)
+      // 先获取当前状态，以便判断是拒绝还是下架
+      const { data: currentAgent, error: fetchError } = await supabaseAdmin
+        .from('agents')
+        .select('status, name, creator_id')
+        .eq('id', id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
       // 使用 supabaseAdmin 绕过 RLS 限制
       const { data: agent, error } = await supabaseAdmin
         .from('agents')
@@ -498,8 +547,14 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       // 发送通知
       if (status === 'public') {
         await sendNotification(agent.creator_id, 'audit_approved', '智能体审核通过', `您的智能体 "${agent.name}" 已通过审核并发布上线。`);
-      } else if (status === 'private') { // 拒绝转为 private
-         await sendNotification(agent.creator_id, 'audit_rejected', '智能体审核未通过', `您的智能体 "${agent.name}" 审核未通过，已转为私有状态。`);
+      } else if (status === 'private') { 
+         if (currentAgent.status === 'pending') {
+            // 审核拒绝
+            await sendNotification(agent.creator_id, 'audit_rejected', '智能体审核未通过', `您的智能体 "${agent.name}" 审核未通过，已转为私有状态。`);
+         } else if (currentAgent.status === 'public') {
+            // 管理员下架
+            await sendNotification(agent.creator_id, 'system', '智能体已下架', `您的智能体 "${agent.name}" 已被管理员下架，转为私有状态。如有疑问请联系管理员。`);
+         }
       }
 
       res.json({
