@@ -17,6 +17,7 @@ const CreateAgent: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -45,36 +46,97 @@ const CreateAgent: React.FC = () => {
       if (!event.target.files || event.target.files.length === 0) {
         return;
       }
+
+      if (!user) {
+        setSubmitError('请先登录后再上传图片');
+        return;
+      }
       
       const file = event.target.files[0];
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `${user?.id}/${fileName}`;
-
-      setUploading(true);
+      
+      // Check file size (1MB limit)
+      if (file.size > 1024 * 1024) {
+        setSubmitError('图片大小不能超过 1MB');
+        return;
+      }
+      
+      // 本地预览，暂不上传
+      const objectUrl = URL.createObjectURL(file);
+      setPreviewUrl(objectUrl);
+      setSelectedFile(file);
+      setValue('avatar_url', objectUrl); // 临时显示用
       setSubmitError(null);
-
-      // 上传到 'agent-avatars' 桶
-      const { error: uploadError } = await supabase.storage
-        .from('agent-avatars')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      // 获取公共 URL
-      const { data } = supabase.storage
-        .from('agent-avatars')
-        .getPublicUrl(filePath);
-
-      if (data) {
-        setValue('avatar_url', data.publicUrl);
-        setPreviewUrl(data.publicUrl);
-      }
+      
     } catch (error: any) {
-      console.error('Error uploading avatar:', error);
-      setSubmitError(error.message || '图片上传失败');
+      console.error('Error selecting avatar:', error);
+      setSubmitError(error.message || '图片选择失败');
+    }
+  };
+
+  const uploadFileToSupabase = async (file: File): Promise<string> => {
+    if (!user) throw new Error('User not authenticated');
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('agent-avatars')
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage
+      .from('agent-avatars')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
+  const onSubmit = async (data: CreateAgentRequest & { tag: string }) => {
+    setSubmitError(null);
+    setUploading(true);
+    
+    try {
+      let finalAvatarUrl = data.avatar_url;
+
+      // 如果选择了新文件，先上传
+      if (selectedFile) {
+        try {
+          finalAvatarUrl = await uploadFileToSupabase(selectedFile);
+        } catch (err: any) {
+          console.error('Failed to upload avatar:', err);
+          setSubmitError('头像上传失败，请重试');
+          setUploading(false);
+          return;
+        }
+      }
+
+      const agentData = {
+        ...data,
+        avatar_url: finalAvatarUrl,
+        tags: data.tag ? [data.tag] : []
+      };
+      
+      // ... rest of the submit logic
+      const isPublic = data.status === 'public';
+      const isAdmin = user?.role === 'admin';
+
+      if (isPublic && isAdmin) {
+         setModalConfig({
+           isOpen: true,
+           title: '确认发布',
+           message: '您是管理员，选择公开发布将直接上线，无需审核。确定要继续吗？',
+           type: 'info',
+           onConfirm: () => doCreate(agentData)
+         });
+      } else {
+         await doCreate(agentData);
+      }
+    } catch (err: any) {
+      setSubmitError(err.message || '创建智能体失败');
     } finally {
       setUploading(false);
     }
@@ -157,30 +219,20 @@ const CreateAgent: React.FC = () => {
     const newAgent = await createAgent(requestData);
     
     if (newAgent) {
-      navigate('/agents/my');
+      setModalConfig({
+        isOpen: true,
+        title: '创建成功',
+        message: '智能体已成功创建！',
+        type: 'success',
+        onConfirm: () => {
+          navigate('/agents/my');
+        }
+      });
     } else {
       setSubmitError('创建失败，请重试');
     }
   };
 
-  const onSubmit = async (data: CreateAgentRequest & { tag: string }) => {
-    setSubmitError(null);
-    
-    const isPublic = data.status === 'public';
-    const isAdmin = user?.role === 'admin';
-
-    if (isPublic && isAdmin) {
-       setModalConfig({
-         isOpen: true,
-         title: '确认发布',
-         message: '您是管理员，选择公开发布将直接上线，无需审核。确定要继续吗？',
-         type: 'info',
-         onConfirm: () => doCreate(data)
-       });
-    } else {
-       doCreate(data);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">

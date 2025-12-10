@@ -86,7 +86,7 @@
 
 所有表均已启用 RLS (Row Level Security)。
 
-### 访问策略摘要
+### 数据表访问策略
 *   **Users**:
     *   用户只能查看和更新自己的资料。
     *   管理员可以查看所有用户资料。
@@ -104,6 +104,12 @@
 *   **Favorites**:
     *   用户只能管理自己的收藏列表。
 
+### 存储桶访问策略 (Storage)
+Bucket: `agent-avatars`
+*   **Public Access**: 允许公开读取文件。
+*   **Upload (Insert)**: 仅允许认证用户上传，且文件大小限制为 1MB。
+*   **Update/Delete**: 仅允许认证用户修改/删除**自己上传的**文件 (路径匹配用户 ID)。
+
 ---
 
 ## 3. 迁移历史 (Migrations)
@@ -119,6 +125,7 @@
 7.  `20251207_add_session_mode.sql`: 为会话添加 `mode` 字段（调试/普通）。
 8.  `20251210_add_tags_and_favorites.sql`: 添加标签系统和收藏功能。
 9.  `20251210_update_agent_tags_v2.sql`: 标签数据清洗与迁移（标准化分类）。
+10. `20251210_fix_storage_rls_v5.sql`: 修复存储桶 RLS 策略，限制文件大小为 1MB，确保用户只能管理自己的文件。
 
 ## 4. 维护说明
 

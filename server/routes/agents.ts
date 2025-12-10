@@ -503,7 +503,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     // 检查权限
     const { data: agent, error: fetchError } = await supabaseAdmin
       .from('agents')
-      .select('creator_id, status')
+      .select('creator_id, status, avatar_url')
       .eq('id', id)
       .single();
 
@@ -519,6 +519,27 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     // 执行删除
+    // 如果智能体有头像且存储在 agent-avatars 桶中，尝试删除
+    if (agent.avatar_url && agent.avatar_url.includes('agent-avatars')) {
+      try {
+        const urlParts = agent.avatar_url.split('/');
+        // 假设 URL 格式类似 .../agent-avatars/user_id/filename
+        const fileName = urlParts.pop();
+        const userIdPart = urlParts.pop(); // user_id
+        
+        if (fileName && userIdPart) {
+          const filePath = `${userIdPart}/${fileName}`;
+          await supabaseAdmin.storage
+            .from('agent-avatars')
+            .remove([filePath]);
+          console.log(`Deleted avatar for agent ${id}: ${filePath}`);
+        }
+      } catch (err) {
+        console.error('Failed to delete avatar:', err);
+        // 删除头像失败不阻止删除智能体
+      }
+    }
+
     const { error: deleteError } = await supabaseAdmin
       .from('agents')
       .delete()

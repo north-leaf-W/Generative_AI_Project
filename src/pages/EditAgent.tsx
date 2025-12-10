@@ -31,6 +31,7 @@ const EditAgent: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [fetching, setFetching] = useState(true);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const { register, handleSubmit, setValue, watch, formState: { errors }, reset } = useForm<EditAgentFormData>({
     defaultValues: {
@@ -98,36 +99,45 @@ const EditAgent: React.FC = () => {
       }
       
       const file = event.target.files[0];
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `${user?.id}/${fileName}`;
 
-      setUploading(true);
+      // Check file size (1MB limit)
+      if (file.size > 1024 * 1024) {
+        setSubmitError('图片大小不能超过 1MB');
+        return;
+      }
+      
+      // 本地预览，暂不上传
+      const objectUrl = URL.createObjectURL(file);
+      setSelectedFile(file);
+      setValue('avatar_url', objectUrl); // 临时显示用
       setSubmitError(null);
 
-      // Upload to 'agent-avatars' bucket
-      const { error: uploadError } = await supabase.storage
-        .from('agent-avatars')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      // Get public URL
-      const { data } = supabase.storage
-        .from('agent-avatars')
-        .getPublicUrl(filePath);
-
-      if (data) {
-        setValue('avatar_url', data.publicUrl);
-      }
     } catch (error: any) {
-      console.error('Error uploading avatar:', error);
-      setSubmitError(error.message || '图片上传失败');
-    } finally {
-      setUploading(false);
+      console.error('Error selecting avatar:', error);
+      setSubmitError(error.message || '图片选择失败');
     }
+  };
+
+  const uploadFileToSupabase = async (file: File): Promise<string> => {
+    if (!user) throw new Error('User not authenticated');
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('agent-avatars')
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage
+      .from('agent-avatars')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
   };
 
   const handleAIGenerate = async () => {
@@ -220,10 +230,27 @@ const EditAgent: React.FC = () => {
     if (!id) return;
     setSubmitError(null);
     setSaveSuccess(false);
+
+    let finalAvatarUrl = data.avatar_url;
+
+    // 如果选择了新文件，先上传
+    if (selectedFile) {
+      setUploading(true);
+      try {
+        finalAvatarUrl = await uploadFileToSupabase(selectedFile);
+      } catch (err: any) {
+        console.error('Failed to upload avatar:', err);
+        setSubmitError('头像上传失败，请重试');
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
     
     const { tag, ...rest } = data;
     const updateData = {
       ...rest,
+      avatar_url: finalAvatarUrl,
       tags: [tag]
     };
     
