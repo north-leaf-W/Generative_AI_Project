@@ -8,7 +8,7 @@ const router = express.Router();
 
 // Helper to get favorites map
 async function getFavoritesMap(userId: string) {
-  const { data } = await supabase
+  const { data } = await supabaseAdmin
     .from('favorites')
     .select('agent_id')
     .eq('user_id', userId);
@@ -117,44 +117,25 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
-// 获取我的收藏列表
-router.get('/favorites', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user!.id;
-    
-    // Join favorites and agents
-    const { data, error } = await supabase
-      .from('favorites')
-      .select('agent_id, agents (*)')
-      .eq('user_id', userId);
-      
-    if (error) throw error;
-    
-    // Transform data: extract agent from join result and add is_favorited
-    const agents = (data || [])
-      .map((item: any) => {
-        if (!item.agents) return null;
-        return {
-          ...item.agents,
-          is_favorited: true
-        } as Agent;
-      })
-      .filter((a): a is Agent => a !== null && a.is_active); 
-    
-    res.json({ success: true, data: agents });
-  } catch (error: any) {
-    console.error('Get favorites error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // 收藏智能体
 router.post('/:id/favorite', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
     const agentId = req.params.id;
     
-    const { error } = await supabase
+    // Check if agent exists
+    const { data: agent } = await supabaseAdmin
+      .from('agents')
+      .select('id')
+      .eq('id', agentId)
+      .single();
+      
+    if (!agent) {
+      return res.status(404).json({ success: false, error: 'Agent not found' });
+    }
+    
+    // Use supabaseAdmin to bypass RLS
+    const { error } = await supabaseAdmin
       .from('favorites')
       .insert({ user_id: userId, agent_id: agentId });
       
@@ -163,7 +144,7 @@ router.post('/:id/favorite', authenticateToken, async (req, res) => {
       if (error.code !== '23505') throw error;
     }
     
-    res.json({ success: true });
+    res.json({ success: true, message: 'Favorited' });
   } catch (error: any) {
     console.error('Add favorite error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -176,7 +157,8 @@ router.delete('/:id/favorite', authenticateToken, async (req, res) => {
     const userId = req.user!.id;
     const agentId = req.params.id;
     
-    const { error } = await supabase
+    // Use supabaseAdmin to bypass RLS
+    const { error } = await supabaseAdmin
       .from('favorites')
       .delete()
       .eq('user_id', userId)
@@ -184,7 +166,7 @@ router.delete('/:id/favorite', authenticateToken, async (req, res) => {
       
     if (error) throw error;
     
-    res.json({ success: true });
+    res.json({ success: true, message: 'Unfavorited' });
   } catch (error: any) {
     console.error('Remove favorite error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -388,6 +370,46 @@ router.get('/pending', authenticateToken, async (req, res) => {
     });
   } catch (error: any) {
     console.error('Get pending agents error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取用户收藏的智能体列表
+router.get('/favorites', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    
+    const { data: favorites, error } = await supabaseAdmin
+      .from('favorites')
+      .select('agent_id')
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    
+    if (!favorites || favorites.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+    
+    const agentIds = favorites.map(f => f.agent_id);
+    
+    // 获取智能体详情
+    const { data: agents, error: agentsError } = await supabaseAdmin
+      .from('agents')
+      .select('*')
+      .in('id', agentIds)
+      .eq('is_active', true);
+      
+    if (agentsError) throw agentsError;
+    
+    // 标记为已收藏
+    const result = (agents || []).map(agent => ({
+      ...agent,
+      is_favorited: true
+    }));
+    
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('Get favorites error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
