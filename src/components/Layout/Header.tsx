@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, LogOut, MessageSquare } from 'lucide-react';
+import { User, LogOut } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth';
 import { useNotificationsStore } from '../../stores/notifications';
 
@@ -32,9 +32,7 @@ const Header: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-white" />
-            </div>
+            <img src="/robot_face.png" alt="AI对话平台" className="w-8 h-8 rounded-lg" />
             <span className="text-xl font-bold text-gray-900">AI对话平台</span>
           </Link>
 
