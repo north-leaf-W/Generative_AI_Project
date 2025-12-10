@@ -36,11 +36,13 @@ src/             # 前端代码
   ├── stores/    # Zustand 状态管理
   ├── config/    # 前端配置
   └── lib/       # 工具函数
-api/             # 后端代码 (Express App)
+server/          # 后端核心逻辑 (Express App)
   ├── routes/    # API 路由
   ├── middleware/# 中间件 (Auth)
   ├── services/  # 业务逻辑 (LangChain)
   └── config/    # 后端配置
+api/             # Vercel Serverless 入口
+  └── index.ts   # 统一入口文件
 shared/          # 前后端共享类型定义
 supabase/        # 数据库相关
   └── migrations/# SQL 初始化脚本
