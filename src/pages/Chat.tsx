@@ -159,10 +159,24 @@ const Chat: React.FC = () => {
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    const date = new Date(timestamp);
+    const now = new Date();
+    
+    const isToday = date.toDateString() === now.toDateString();
+    const isThisYear = date.getFullYear() === now.getFullYear();
+
+    const timeStr = date.toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit'
     });
+
+    if (isToday) {
+      return timeStr;
+    } else if (isThisYear) {
+      return `${(date.getMonth() + 1).toString().padStart(2, '0')}月${date.getDate().toString().padStart(2, '0')}日 ${timeStr}`;
+    } else {
+      return `${date.getFullYear()}年${(date.getMonth() + 1).toString().padStart(2, '0')}月${date.getDate().toString().padStart(2, '0')}日 ${timeStr}`;
+    }
   };
 
   if (!currentAgent) {

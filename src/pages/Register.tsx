@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, ArrowRight, MessageSquare } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
+import { AnimatedBackground } from '../components/Layout/AnimatedBackground';
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
@@ -46,8 +47,9 @@ const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center px-4">
-      <div className="max-w-md w-full">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+      <AnimatedBackground />
+      <div className="max-w-md w-full relative z-10">
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center mx-auto mb-4">
@@ -58,7 +60,7 @@ const Register: React.FC = () => {
         </div>
 
         {/* Register Form */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-white/20">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Name Input */}
             <div>

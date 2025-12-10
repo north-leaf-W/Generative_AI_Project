@@ -53,15 +53,14 @@ router.get('/', optionalAuth, async (req, res) => {
     
     let allAgents: Agent[] = publicAgents || [];
     
-    // 如果是管理员，填充作者信息和检查待审核版本
-    if (isAdmin && allAgents.length > 0) {
-      // 手动获取作者信息，避免依赖外键约束
+    // 填充作者信息
+    if (allAgents.length > 0) {
       const creatorIds = [...new Set(allAgents.map(a => a.creator_id).filter(id => id))];
       
       if (creatorIds.length > 0) {
         const { data: creators } = await supabaseAdmin
           .from('users')
-          .select('id, name, email')
+          .select('id, name')
           .in('id', creatorIds);
           
         if (creators) {
@@ -72,7 +71,10 @@ router.get('/', optionalAuth, async (req, res) => {
           }));
         }
       }
+    }
 
+    // 如果是管理员，检查待审核版本
+    if (isAdmin && allAgents.length > 0) {
       const agentIds = allAgents.map(a => a.id);
       const { data: revisions } = await supabaseAdmin
         .from('agent_revisions')

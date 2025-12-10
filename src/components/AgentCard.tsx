@@ -51,6 +51,11 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               <h3 className="text-lg font-bold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
                 {agent.name}
               </h3>
+              {agent.creator && (
+                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                  @{agent.creator.name}
+                </p>
+              )}
               {/* Tags replacing Online status */}
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {agent.tags && agent.tags.length > 0 ? (
