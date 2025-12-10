@@ -118,6 +118,7 @@ export interface ChatRequest {
   sessionId: string;
   message: string;
   agentId: string;
+  webSearch?: boolean;
 }
 
 export interface ChatResponse {

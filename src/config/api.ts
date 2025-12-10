@@ -39,6 +39,8 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/notifications`,
     read: (id: string) => `${API_BASE_URL}/notifications/${id}/read`,
     readAll: `${API_BASE_URL}/notifications/read-all`,
+    delete: (id: string) => `${API_BASE_URL}/notifications/${id}`,
+    clear: `${API_BASE_URL}/notifications`,
   },
   ai: {
     optimizePrompt: `${API_BASE_URL}/ai/optimize-prompt`,

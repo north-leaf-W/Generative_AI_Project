@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { Response } from 'express';
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
+import { TavilySearch } from "@langchain/tavily";
 
 // 创建阿里云DashScope模型的LangChain实例
 export const createDashScopeModel = () => {
@@ -15,7 +16,7 @@ export const createDashScopeModel = () => {
 
   return new ChatOpenAI({
     modelName: model,
-    openAIApiKey: apiKey,
+    apiKey: apiKey,
     configuration: {
       baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     },
@@ -59,7 +60,8 @@ export const generateAIResponse = async (
   message: string,
   agentPrompt: string,
   messageHistory: Array<{ role: string; content: string }>,
-  res: Response
+  res: Response,
+  enableWebSearch: boolean = false
 ) : Promise<string> => {
   try {
     const model = createDashScopeModel();
@@ -69,8 +71,39 @@ export const generateAIResponse = async (
     const donePromise = new Promise<string>((resolve) => { resolveFn = (text: string) => resolve(text || aiResponse.trim()); });
     const streamHandler = createStreamHandler(res, append, resolveFn);
 
+    // 处理联网搜索
+    let finalMessage = message;
+    if (enableWebSearch) {
+      try {
+        const apiKey = process.env.TAVILY_API_KEY;
+        if (!apiKey) {
+          console.warn('TAVILY_API_KEY is not configured, skipping web search');
+          // 可选：发送警告给前端
+          // res.write(`data: ${JSON.stringify({ type: 'warning', content: 'Web search is enabled but TAVILY_API_KEY is missing.' })}\n\n`);
+        } else {
+          console.log('Executing web search with Tavily for:', message);
+          
+          const searchTool = new TavilySearch({ 
+            maxResults: 3,
+            tavilyApiKey: apiKey
+          });
+          const searchResult = await searchTool.invoke({ query: message });
+          
+          if (searchResult) {
+            console.log('Search results found');
+            const searchContent = typeof searchResult === 'string' ? searchResult : JSON.stringify(searchResult, null, 2);
+            finalMessage = `Context from web search:\n${searchContent}\n\nUser Question:\n${message}`;
+          }
+        }
+      } catch (error) {
+        console.error('Web Search Error:', error);
+        // 搜索失败不中断流程，继续使用原始消息
+      }
+    }
+
     // 创建系统提示词
-    const systemPrompt = agentPrompt || 'You are a helpful AI assistant.';
+    const currentDate = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    const systemPrompt = (agentPrompt || 'You are a helpful AI assistant.') + `\n\nCurrent System Time: ${currentDate}`;
 
     // 设置响应头以支持SSE
     res.setHeader('Content-Type', 'text/event-stream');
@@ -88,7 +121,7 @@ export const generateAIResponse = async (
         }
         return new HumanMessage(msg.content);
       }),
-      new HumanMessage(message)
+      new HumanMessage(finalMessage)
     ];
 
     await model.invoke(messages, {
@@ -100,11 +133,11 @@ export const generateAIResponse = async (
     console.error('AI Response Error:', error);
     try {
       const errorResponse = {
-        error: 'AI service error',
+        error: error instanceof Error ? error.message : 'AI service error',
         timestamp: new Date().toISOString()
       };
       res.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
-      res.write('data: [ERROR]\n\n');
+      res.write('data: [DONE]\n\n');
       res.end();
     } catch (streamError) {
       console.error('Error writing error response:', streamError);

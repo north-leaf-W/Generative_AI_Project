@@ -14,7 +14,7 @@ interface ChatState {
   fetchSessions: (agentId?: string, mode?: 'public' | 'dev') => Promise<void>;
   createSession: (agentId: string, title?: string, mode?: 'public' | 'dev') => Promise<Session | null>;
   fetchMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void) => Promise<void>;
+  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   setCurrentSession: (session: Session | null) => void;
   clearChat: () => void;
@@ -133,7 +133,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void) => {
+  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => {
     set({ isStreaming: true, error: null });
     
     try {
@@ -155,8 +155,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       await streamRequest(
         API_ENDPOINTS.chat.stream,
-        { sessionId, message, agentId },
+        { sessionId, message, agentId, webSearch },
         (data) => {
+          if (data.error) {
+            throw new Error(data.error);
+          }
           if (data.token) {
             aiResponse += data.token;
             onToken(data.token);

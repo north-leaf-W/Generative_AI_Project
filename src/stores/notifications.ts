@@ -13,6 +13,8 @@ interface NotificationsState {
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: string) => Promise<boolean>;
   markAllAsRead: () => Promise<boolean>;
+  deleteNotification: (id: string) => Promise<boolean>;
+  clearAllNotifications: () => Promise<boolean>;
   clearError: () => void;
   startPolling: () => void;
   stopPolling: () => void;
@@ -120,6 +122,48 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
       return false;
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
+      return false;
+    }
+  },
+
+  deleteNotification: async (id: string) => {
+    try {
+      const response = await apiRequest(API_ENDPOINTS.notifications.delete(id), {
+        method: 'DELETE',
+      });
+
+      if (response.success) {
+        const notifications = get().notifications.filter(n => n.id !== id);
+        const unreadCount = notifications.filter(n => !n.is_read).length;
+        set({ 
+          notifications,
+          unreadCount
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+      return false;
+    }
+  },
+
+  clearAllNotifications: async () => {
+    try {
+      const response = await apiRequest(API_ENDPOINTS.notifications.clear, {
+        method: 'DELETE',
+      });
+
+      if (response.success) {
+        set({ 
+          notifications: [],
+          unreadCount: 0
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to clear all notifications:', error);
       return false;
     }
   },

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
-import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell, RefreshCcw, CheckCheck } from 'lucide-react';
+import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell, RefreshCcw, CheckCheck, Trash2 } from 'lucide-react';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const Profile: React.FC = () => {
   const { user, checkAuth, logout, changePassword, updateProfile, isLoading, error, clearError } = useAuthStore();
-  const { notifications, fetchNotifications, markAsRead, markAllAsRead, isLoading: notifLoading } = useNotificationsStore();
+  const { notifications, fetchNotifications, markAsRead, markAllAsRead, deleteNotification, clearAllNotifications, isLoading: notifLoading } = useNotificationsStore();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
@@ -13,6 +14,10 @@ const Profile: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -20,8 +25,40 @@ const Profile: React.FC = () => {
     fetchNotifications();
   }, [checkAuth, clearError, fetchNotifications]);
 
+  const handleRefreshNotifications = async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchNotifications();
+    } finally {
+      // 延迟一点结束动画，让用户能感知到刷新
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
   const handleMarkAsRead = async (id: string) => {
     await markAsRead(id);
+  };
+  
+  const handleDeleteClick = async (id: string) => {
+    if (confirmDeleteId === id) {
+      await deleteNotification(id);
+      setConfirmDeleteId(null);
+    } else {
+      setConfirmDeleteId(id);
+      // 3秒后如果没有再次点击，自动取消确认状态
+      setTimeout(() => {
+        setConfirmDeleteId((current) => (current === id ? null : current));
+      }, 3000);
+    }
+  };
+
+  const handleClearAllClick = () => {
+    setIsClearAllModalOpen(true);
+  };
+
+  const handleConfirmClearAll = async () => {
+    await clearAllNotifications();
+    setIsClearAllModalOpen(false);
   };
 
 
@@ -212,11 +249,11 @@ const Profile: React.FC = () => {
           </h2>
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => fetchNotifications()}
+              onClick={handleRefreshNotifications}
               className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
               title="刷新消息"
             >
-              <RefreshCcw className={`w-4 h-4 ${notifLoading ? 'animate-spin' : ''}`} />
+              <RefreshCcw className={`w-4 h-4 ${notifLoading || isRefreshing ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={() => markAllAsRead()}
@@ -225,6 +262,14 @@ const Profile: React.FC = () => {
             >
               <CheckCheck className="w-4 h-4" />
               <span className="hidden sm:inline">全部已读</span>
+            </button>
+            <button
+              onClick={handleClearAllClick}
+              className="flex items-center space-x-1 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              title="全部清空"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">全部清空</span>
             </button>
           </div>
         </div>
@@ -252,15 +297,28 @@ const Profile: React.FC = () => {
                       {new Date(notification.created_at).toLocaleString()}
                     </span>
                   </div>
-                  {!notification.is_read && (
+                  <div className="flex items-center ml-4 space-x-2">
+                    {!notification.is_read && (
+                      <button
+                        onClick={() => handleMarkAsRead(notification.id)}
+                        className="p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                        title="标记为已读"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleMarkAsRead(notification.id)}
-                      className="ml-4 p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
-                      title="标记为已读"
+                      onClick={() => handleDeleteClick(notification.id)}
+                      className={`p-1 rounded-full transition-colors ${
+                        confirmDeleteId === notification.id
+                          ? 'text-red-600 bg-red-100 hover:bg-red-200 ring-2 ring-red-200'
+                          : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                      }`}
+                      title={confirmDeleteId === notification.id ? "再次点击确认删除" : "删除消息"}
                     >
-                      <CheckCircle className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -281,6 +339,16 @@ const Profile: React.FC = () => {
            </div>
         )}
       </section>
+
+      <ConfirmationModal
+        isOpen={isClearAllModalOpen}
+        onClose={() => setIsClearAllModalOpen(false)}
+        onConfirm={handleConfirmClearAll}
+        title="清空所有消息"
+        message="确定要删除所有消息吗？此操作无法撤销。"
+        type="danger"
+        confirmText="确认清空"
+      />
     </div>
   );
 };

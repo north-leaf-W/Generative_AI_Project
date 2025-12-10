@@ -140,6 +140,59 @@ const EditAgent: React.FC = () => {
     return data.publicUrl;
   };
 
+  const deleteFileFromSupabase = async (url: string) => {
+    try {
+      // 简单判断是否为当前项目的 Supabase Storage URL
+      // 更加严谨的做法是对比 VITE_SUPABASE_URL，但这里只要包含 bucket 路径基本就够了
+      if (!url || !url.includes('/storage/v1/object/public/agent-avatars/')) {
+        return;
+      }
+      
+      // 提取文件路径: .../agent-avatars/user_id/filename
+      const path = url.split('/agent-avatars/')[1];
+      if (!path) return;
+      
+      console.log('Deleting old avatar:', path);
+      const { error } = await supabase.storage
+        .from('agent-avatars')
+        .remove([path]);
+        
+      if (error) {
+        console.warn('Failed to delete old avatar:', error);
+      }
+    } catch (e) {
+      console.warn('Exception while deleting old avatar:', e);
+    }
+  };
+
+  const urlToFile = async (url: string, filename: string): Promise<File> => {
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type });
+    } catch (error) {
+      console.error('urlToFile failed:', error);
+      throw error;
+    }
+  };
+
+  const handleRandomAvatar = async () => {
+    const seed = Math.random().toString(36).substring(7);
+    const url = `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`;
+    
+    setValue('avatar_url', url);
+    
+    try {
+      // 尝试将随机头像转换为文件以便上传
+      const file = await urlToFile(url, `random-avatar-${seed}.svg`);
+      setSelectedFile(file);
+    } catch (e) {
+      console.warn('Failed to process random avatar:', e);
+      setSubmitError('警告：随机头像转存失败，建议重试。');
+    }
+  };
+
   const handleAIGenerate = async () => {
     const description = watch('description');
     if (!description || description.trim() === '') {
@@ -195,9 +248,20 @@ const EditAgent: React.FC = () => {
     
     // 预加载图片
     const img = new Image();
+    img.crossOrigin = "Anonymous";
     img.src = aiAvatarUrl;
-    img.onload = () => {
+    img.onload = async () => {
       setValue('avatar_url', aiAvatarUrl);
+      
+      try {
+        // 将 AI 生成的图片转换为 File 对象，以便在提交时上传到 Supabase
+        const file = await urlToFile(aiAvatarUrl, `ai-avatar-${seed}.jpg`);
+        setSelectedFile(file);
+      } catch (e) {
+        console.warn('Failed to convert AI image to file:', e);
+        setSubmitError('警告：图片转存失败，可能会导致后续无法加载。建议重新生成或手动上传图片。');
+      }
+      
       setIsGenerating(false);
     };
     img.onerror = () => {
@@ -232,12 +296,33 @@ const EditAgent: React.FC = () => {
     setSaveSuccess(false);
 
     let finalAvatarUrl = data.avatar_url;
+    let fileToUpload = selectedFile;
+
+    // 补救措施：如果是远程图片且没有 selectedFile，尝试再次转换
+    if (!fileToUpload && finalAvatarUrl && (finalAvatarUrl.includes('pollinations.ai') || finalAvatarUrl.includes('dicebear.com'))) {
+        try {
+           const seed = Math.random().toString(36).substring(7);
+           // 根据 URL 特征推断文件扩展名
+           const ext = finalAvatarUrl.includes('dicebear') ? 'svg' : 'jpg';
+           fileToUpload = await urlToFile(finalAvatarUrl, `avatar-${seed}.${ext}`);
+        } catch (e) {
+           console.error('Retry urlToFile failed:', e);
+           setSubmitError('无法将远程图片保存到存储桶，请更换图片或重试');
+           return;
+        }
+    }
 
     // 如果选择了新文件，先上传
-    if (selectedFile) {
+    if (fileToUpload) {
       setUploading(true);
       try {
-        finalAvatarUrl = await uploadFileToSupabase(selectedFile);
+        finalAvatarUrl = await uploadFileToSupabase(fileToUpload);
+        
+        // 上传成功后，如果有旧头像且是 Supabase 的，删除旧头像
+        // 注意：这里需要对比是否真的更改了头像
+        if (currentAgent?.avatar_url && currentAgent.avatar_url !== finalAvatarUrl) {
+           await deleteFileFromSupabase(currentAgent.avatar_url);
+        }
       } catch (err: any) {
         console.error('Failed to upload avatar:', err);
         setSubmitError('头像上传失败，请重试');
@@ -257,6 +342,13 @@ const EditAgent: React.FC = () => {
     const result = await updateAgent(id, updateData, actionType);
     
     if (result.success) {
+      // 如果更新成功，且头像发生了变化，尝试删除旧的 Supabase 头像
+      const oldAvatarUrl = currentAgent?.avatar_url;
+      if (oldAvatarUrl && oldAvatarUrl !== finalAvatarUrl) {
+        // 不等待删除完成，以免阻塞 UI
+        deleteFileFromSupabase(oldAvatarUrl);
+      }
+
       if (actionType === 'publish') {
          if (result.message) {
            setModalConfig({
@@ -430,7 +522,7 @@ const EditAgent: React.FC = () => {
                     <span className="text-gray-400 text-sm">或</span>
                     <button
                       type="button"
-                      onClick={() => setValue('avatar_url', `https://api.dicebear.com/7.x/bottts/svg?seed=${Math.random().toString(36)}`)}
+                      onClick={handleRandomAvatar}
                       className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       disabled={readonly}
                     >
@@ -471,7 +563,7 @@ const EditAgent: React.FC = () => {
                     />
                   </div>
                   <p className="text-xs text-gray-500">
-                    支持 JPG, PNG, GIF, SVG 格式，最大 2MB
+                    支持 JPG, PNG, GIF, SVG 格式，最大 1MB
                   </p>
                 </div>
               </div>

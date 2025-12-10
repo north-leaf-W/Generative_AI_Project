@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star } from 'lucide-react';
+import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
@@ -33,6 +33,7 @@ const Chat: React.FC = () => {
   } = useChatStore();
 
   const [inputMessage, setInputMessage] = useState('');
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [agentLoading, setAgentLoading] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -129,9 +130,13 @@ const Chat: React.FC = () => {
     setInputMessage('');
 
     try {
-      await sendMessage(targetSessionId, message, agentId, () => {});
+      await sendMessage(targetSessionId, message, agentId, () => {}, isWebSearchEnabled);
     } catch (error) {
       console.error('Failed to send message:', error);
+      // 如果出错，把消息放回输入框，方便用户重试
+      setInputMessage(message);
+      // 这里可以添加一个简单的 alert 或者 toast 提示
+      alert('发送消息失败，请检查网络或后端服务是否正常。');
     }
   };
 
@@ -461,6 +466,17 @@ const Chat: React.FC = () => {
             </div>
 
             <div className="bg-white rounded-[2rem] shadow-xl border border-white/50 p-2 flex items-end space-x-2 transition-all hover:shadow-2xl relative z-20">
+              <button
+                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
+                  isWebSearchEnabled 
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
+                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
+                title={isWebSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
+              >
+                <Globe className="w-5 h-5" />
+              </button>
               <div className="flex-1">
                 <textarea
                   ref={inputRef}

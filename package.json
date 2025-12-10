@@ -13,8 +13,9 @@
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\""
   },
   "dependencies": {
-    "@langchain/community": "^0.0.28",
-    "@langchain/core": "^0.1.28",
+    "@langchain/community": "^1.0.7",
+    "@langchain/core": "^1.1.4",
+    "@langchain/tavily": "^1.0.1",
     "@supabase/supabase-js": "^2.39.7",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",

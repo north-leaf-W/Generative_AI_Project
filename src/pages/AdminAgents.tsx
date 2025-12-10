@@ -335,9 +335,19 @@ const AdminAgents: React.FC = () => {
 
                           {/* System Prompt for New Agents (or if not changed in revision) */}
                           {(!isRevision || !changes.some(c => c.field === 'system_prompt')) && (
-                             <div className="mt-3 bg-slate-50 p-3 rounded-lg text-sm text-slate-700 font-mono border border-slate-100">
-                               <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1 font-bold">System Prompt</span>
-                               <div className="line-clamp-3">{agent.system_prompt}</div>
+                             <div className="mt-4 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm">
+                               <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200/60">
+                                 <span className="text-xs text-slate-500 uppercase tracking-wider font-bold flex items-center gap-1.5">
+                                   <FileText className="w-3.5 h-3.5" />
+                                   System Prompt (完整提示词)
+                                 </span>
+                                 <span className="text-[10px] text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-100">
+                                   {agent.system_prompt?.length || 0} chars
+                                 </span>
+                               </div>
+                               <div className="max-h-[500px] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700 leading-relaxed font-mono bg-white p-4 rounded-lg border border-slate-100 selection:bg-blue-100 selection:text-blue-900">
+                                 {agent.system_prompt}
+                               </div>
                              </div>
                           )}
                         </div>

@@ -9,7 +9,7 @@ const router = express.Router();
 // 流式聊天接口
 router.post('/stream', authenticateToken, async (req, res) => {
   try {
-    const { sessionId, message, agentId }: ChatRequest = req.body;
+    const { sessionId, message, agentId, webSearch }: ChatRequest = req.body;
     const userId = req.user!.id;
 
     // 验证输入
@@ -94,7 +94,7 @@ router.post('/stream', authenticateToken, async (req, res) => {
     const messageHistory = (historyMessages || []).reverse();
 
     // 生成AI回复（流式），并在完成后保存
-    const aiResponse = await generateAIResponse(message, systemPrompt, messageHistory, res);
+    const aiResponse = await generateAIResponse(message, systemPrompt, messageHistory, res, webSearch);
 
     try {
       if (aiResponse && aiResponse.trim()) {

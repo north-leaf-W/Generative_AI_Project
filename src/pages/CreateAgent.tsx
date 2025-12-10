@@ -101,11 +101,27 @@ const CreateAgent: React.FC = () => {
     
     try {
       let finalAvatarUrl = data.avatar_url;
+      let fileToUpload = selectedFile;
+
+      // 补救措施：如果是远程图片且没有 selectedFile，尝试再次转换
+      if (!fileToUpload && finalAvatarUrl && (finalAvatarUrl.includes('pollinations.ai') || finalAvatarUrl.includes('dicebear.com'))) {
+          try {
+             const seed = Math.random().toString(36).substring(7);
+             // 根据 URL 特征推断文件扩展名
+             const ext = finalAvatarUrl.includes('dicebear') ? 'svg' : 'jpg';
+             fileToUpload = await urlToFile(finalAvatarUrl, `avatar-${seed}.${ext}`);
+          } catch (e) {
+             console.error('Retry urlToFile failed:', e);
+             setSubmitError('无法将远程图片保存到存储桶，请更换图片或重试');
+             setUploading(false);
+             return;
+          }
+      }
 
       // 如果选择了新文件，先上传
-      if (selectedFile) {
+      if (fileToUpload) {
         try {
-          finalAvatarUrl = await uploadFileToSupabase(selectedFile);
+          finalAvatarUrl = await uploadFileToSupabase(fileToUpload);
         } catch (err: any) {
           console.error('Failed to upload avatar:', err);
           setSubmitError('头像上传失败，请重试');
@@ -139,6 +155,35 @@ const CreateAgent: React.FC = () => {
       setSubmitError(err.message || '创建智能体失败');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const urlToFile = async (url: string, filename: string): Promise<File> => {
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type });
+    } catch (error) {
+      console.error('urlToFile failed:', error);
+      throw error;
+    }
+  };
+
+  const handleRandomAvatar = async () => {
+    const seed = Math.random().toString(36).substring(7);
+    const url = `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`;
+    
+    setValue('avatar_url', url);
+    setPreviewUrl(url);
+    
+    try {
+      // 尝试将随机头像转换为文件以便上传
+      const file = await urlToFile(url, `random-avatar-${seed}.svg`);
+      setSelectedFile(file);
+    } catch (e) {
+      console.warn('Failed to process random avatar:', e);
+      setSubmitError('警告：随机头像转存失败，建议重试。');
     }
   };
 
@@ -197,10 +242,21 @@ const CreateAgent: React.FC = () => {
     
     // 预加载图片
     const img = new Image();
+    img.crossOrigin = "Anonymous";
     img.src = aiAvatarUrl;
-    img.onload = () => {
+    img.onload = async () => {
       setValue('avatar_url', aiAvatarUrl);
       setPreviewUrl(aiAvatarUrl);
+      
+      try {
+        // 将 AI 生成的图片转换为 File 对象，以便在提交时上传到 Supabase
+        const file = await urlToFile(aiAvatarUrl, `ai-avatar-${seed}.jpg`);
+        setSelectedFile(file);
+      } catch (e) {
+        console.warn('Failed to convert AI image to file:', e);
+        setSubmitError('警告：图片转存失败，可能会导致后续无法加载。建议重新生成或手动上传图片。');
+      }
+      
       setIsGenerating(false);
     };
     img.onerror = () => {
@@ -329,7 +385,7 @@ const CreateAgent: React.FC = () => {
                     <span className="text-gray-400 text-sm">或</span>
                     <button
                       type="button"
-                      onClick={() => setValue('avatar_url', `https://api.dicebear.com/7.x/bottts/svg?seed=${Math.random().toString(36)}`)}
+                      onClick={handleRandomAvatar}
                       className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                     >
                       随机生成
@@ -368,7 +424,7 @@ const CreateAgent: React.FC = () => {
                     />
                   </div>
                   <p className="text-xs text-gray-500">
-                    支持 JPG, PNG, GIF, SVG 格式，最大 2MB
+                    支持 JPG, PNG, GIF, SVG 格式，最大 1MB
                   </p>
                 </div>
               </div>
