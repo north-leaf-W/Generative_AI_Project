@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.js';
 import agentRoutes from './routes/agents.js';
 import sessionRoutes from './routes/sessions.js';
 import chatRoutes from './routes/chat.js';
+import notificationRoutes from './routes/notifications.js';
 
 // 加载环境变量
 dotenv.config();
@@ -47,6 +48,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404处理
 app.use('/api/*', (req, res) => {

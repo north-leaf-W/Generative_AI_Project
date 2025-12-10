@@ -14,7 +14,11 @@ interface NotificationsState {
   markAsRead: (id: string) => Promise<boolean>;
   markAllAsRead: () => Promise<boolean>;
   clearError: () => void;
+  startPolling: () => void;
+  stopPolling: () => void;
 }
+
+let pollingTimer: NodeJS.Timeout | null = null;
 
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   notifications: [],
@@ -22,6 +26,23 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   isInitialized: false,
   error: null,
   unreadCount: 0,
+
+  startPolling: () => {
+    if (pollingTimer) return;
+    // 立即执行一次
+    get().fetchNotifications();
+    // 设置轮询
+    pollingTimer = setInterval(() => {
+      get().fetchNotifications();
+    }, 30000); // 每30秒轮询一次
+  },
+
+  stopPolling: () => {
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
+    }
+  },
 
   fetchNotifications: async () => {
     // 如果已经初始化过，不再显示全屏loading，避免闪烁

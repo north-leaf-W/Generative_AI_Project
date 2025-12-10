@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Bot, Upload, Loader2, Globe, Lock, ImageIcon, X } from 'lucide-react';
+import { Bot, Upload, Loader2, Globe, Lock, ImageIcon, X, Tag, Sparkles } from 'lucide-react';
 import { useAgentsStore } from '../stores/agents';
 import { CreateAgentRequest } from '../../shared/types';
 import { supabase } from '../lib/utils';
 import { useAuthStore } from '../stores/auth';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const CreateAgent: React.FC = () => {
   const navigate = useNavigate();
@@ -13,9 +14,23 @@ const CreateAgent: React.FC = () => {
   const { createAgent, isLoading, error } = useAgentsStore();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info' | 'success';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onConfirm: () => {},
+  });
 
-  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<CreateAgentRequest>({
+  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<CreateAgentRequest & { tag: string }>({
     defaultValues: {
       status: 'private',
       avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=' + Math.random().toString(36).substring(7)
@@ -64,14 +79,69 @@ const CreateAgent: React.FC = () => {
     }
   };
 
-  const onSubmit = async (data: CreateAgentRequest) => {
+  const handleAIGenerate = () => {
+    const description = watch('description');
+    if (!description || description.trim() === '') {
+      setSubmitError('请先填写简介描述，AI将根据描述生成头像');
+      return;
+    }
+    
+    setIsGenerating(true);
     setSubmitError(null);
-    const newAgent = await createAgent(data);
+    
+    // 优化 Prompt：使用 icon/logo 风格关键词，避免生成写实人像
+    // 模仿 Coze 风格：3D 图标、渐变背景、极简主义
+    const prompt = encodeURIComponent(`minimalist 3d app icon of ${description}, cute, gradient background, high quality, soft lighting, clay style`);
+    // 添加随机种子以确保每次点击都能生成新的
+    const seed = Math.random().toString(36).substring(7);
+    const aiAvatarUrl = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=512&seed=${seed}&nologo=true`;
+    
+    // 预加载图片
+    const img = new Image();
+    img.src = aiAvatarUrl;
+    img.onload = () => {
+      setValue('avatar_url', aiAvatarUrl);
+      setPreviewUrl(aiAvatarUrl);
+      setIsGenerating(false);
+    };
+    img.onerror = () => {
+      setSubmitError('图片生成失败，请重试');
+      setIsGenerating(false);
+    };
+  };
+
+  const doCreate = async (data: CreateAgentRequest & { tag: string }) => {
+    // 构造请求数据，将单选的 tag 转换为 tags 数组
+    const requestData: CreateAgentRequest = {
+      ...data,
+      tags: [data.tag]
+    };
+
+    const newAgent = await createAgent(requestData);
     
     if (newAgent) {
       navigate('/agents/my');
     } else {
       setSubmitError('创建失败，请重试');
+    }
+  };
+
+  const onSubmit = async (data: CreateAgentRequest & { tag: string }) => {
+    setSubmitError(null);
+    
+    const isPublic = data.status === 'public';
+    const isAdmin = user?.role === 'admin';
+
+    if (isPublic && isAdmin) {
+       setModalConfig({
+         isOpen: true,
+         title: '确认发布',
+         message: '您是管理员，选择公开发布将直接上线，无需审核。确定要继续吗？',
+         type: 'info',
+         onConfirm: () => doCreate(data)
+       });
+    } else {
+       doCreate(data);
     }
   };
 
@@ -175,6 +245,25 @@ const CreateAgent: React.FC = () => {
                     >
                       随机生成
                     </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={handleAIGenerate}
+                      className="flex items-center text-sm text-purple-600 hover:text-purple-700 font-medium"
+                      disabled={isGenerating}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          生成中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3 h-3 mr-1" />
+                          AI生成
+                        </>
+                      )}
+                    </button>
                   </div>
                   
                   {/* URL 输入框 (可选，如果用户想直接贴链接) */}
@@ -194,6 +283,38 @@ const CreateAgent: React.FC = () => {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* 标签分类 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                智能体分类 <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {['效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'].map((tag) => (
+                  <label
+                    key={tag}
+                    className={`
+                      relative flex items-center justify-center px-4 py-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all
+                      ${watch('tag') === tag 
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500' 
+                        : 'border-gray-200 text-gray-700'}
+                    `}
+                  >
+                    <input
+                      type="radio"
+                      value={tag}
+                      className="sr-only"
+                      {...register('tag', { required: '请选择智能体分类' })}
+                    />
+                    <Tag className={`w-4 h-4 mr-2 ${watch('tag') === tag ? 'text-blue-500' : 'text-gray-400'}`} />
+                    <span className="text-sm font-medium">{tag}</span>
+                  </label>
+                ))}
+              </div>
+              {errors.tag && (
+                <p className="mt-1 text-sm text-red-500">{errors.tag.message}</p>
+              )}
             </div>
 
             {/* 系统提示词 */}
@@ -274,7 +395,7 @@ const CreateAgent: React.FC = () => {
                 onClick={() => navigate(-1)}
                 className="px-6 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
               >
-                取消
+                返回
               </button>
               <button
                 type="submit"
@@ -294,6 +415,15 @@ const CreateAgent: React.FC = () => {
           </form>
         </div>
       </div>
+      
+      <ConfirmationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        onConfirm={modalConfig.onConfirm}
+      />
     </div>
   );
 };

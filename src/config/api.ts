@@ -19,6 +19,9 @@ export const API_ENDPOINTS = {
     pending: `${API_BASE_URL}/agents/pending`,
     updateStatus: (id: string) => `${API_BASE_URL}/agents/${id}/status`,
     update: (id: string) => `${API_BASE_URL}/agents/${id}`, // 新增更新接口
+    delete: (id: string) => `${API_BASE_URL}/agents/${id}`, // 删除接口
+    favorites: `${API_BASE_URL}/agents/favorites`, // 获取收藏列表
+    favorite: (id: string) => `${API_BASE_URL}/agents/${id}/favorite`, // 收藏/取消收藏
   },
   sessions: {
     create: `${API_BASE_URL}/sessions`,

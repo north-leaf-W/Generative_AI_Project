@@ -5,17 +5,21 @@ import { API_ENDPOINTS, apiRequest } from '../config/api';
 interface AgentsState {
   agents: Agent[];
   myAgents: Agent[];
+  myFavorites: Agent[];
   isLoading: boolean;
   error: string | null;
   
   // Actions
-  fetchAgents: () => Promise<void>;
+  fetchAgents: (tag?: string) => Promise<void>;
   fetchMyAgents: () => Promise<void>;
+  fetchFavorites: () => Promise<void>;
+  toggleFavorite: (agent: Agent) => Promise<boolean>;
   fetchAgent: (id: string) => Promise<Agent | null>;
   createAgent: (data: CreateAgentRequest) => Promise<Agent | null>;
   fetchPendingAgents: () => Promise<void>; // 新增
   updateAgentStatus: (id: string, status: 'public' | 'private' | 'pending', isRevision?: boolean, revisionId?: string) => Promise<boolean>; // 修改
   updateAgent: (id: string, data: Partial<Agent>, action?: 'save' | 'publish') => Promise<{ success: boolean; message?: string }>; // 修改
+  deleteAgent: (id: string) => Promise<boolean>; // 新增
   clearError: () => void;
   pendingAgents: Agent[]; // 新增
 }
@@ -23,15 +27,21 @@ interface AgentsState {
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   agents: [],
   myAgents: [],
+  myFavorites: [],
   pendingAgents: [], // 新增
   isLoading: true, // 初始为加载中
   error: null,
 
-  fetchAgents: async () => {
+  fetchAgents: async (tag?: string) => {
     set({ isLoading: true, error: null });
     
     try {
-      const response = await apiRequest<ApiResponse<Agent[]>>(API_ENDPOINTS.agents.list, {
+      let url = API_ENDPOINTS.agents.list;
+      if (tag && tag !== '全部') {
+        url += `?tag=${encodeURIComponent(tag)}`;
+      }
+
+      const response = await apiRequest<ApiResponse<Agent[]>>(url, {
         method: 'GET',
       });
 
@@ -76,6 +86,65 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         isLoading: false, 
         error: errorMessage 
       });
+    }
+  },
+
+  fetchFavorites: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await apiRequest<ApiResponse<Agent[]>>(API_ENDPOINTS.agents.favorites, {
+        method: 'GET',
+      });
+      if (response.success && response.data) {
+        set({ 
+          myFavorites: response.data, 
+          isLoading: false,
+          error: null
+        });
+      }
+    } catch (error) {
+      console.error('Fetch favorites error', error);
+      set({ isLoading: false });
+    }
+  },
+
+  toggleFavorite: async (agent: Agent) => {
+    // Ensure we use the latest state from the store
+    const currentAgent = get().agents.find(a => a.id === agent.id) || 
+                        get().myFavorites.find(a => a.id === agent.id) || 
+                        get().myAgents.find(a => a.id === agent.id) || 
+                        agent;
+                        
+    const isFav = currentAgent.is_favorited;
+    const method = isFav ? 'DELETE' : 'POST';
+    
+    // Optimistic update
+    const updateList = (list: Agent[]) => list.map(a => a.id === agent.id ? { ...a, is_favorited: !isFav } : a);
+    
+    set(state => ({
+      agents: updateList(state.agents),
+      myAgents: updateList(state.myAgents),
+      myFavorites: isFav 
+        ? state.myFavorites.filter(a => a.id !== agent.id) 
+        : [...state.myFavorites, { ...currentAgent, is_favorited: true }]
+    }));
+
+    try {
+      const response = await apiRequest(API_ENDPOINTS.agents.favorite(agent.id), { method });
+      if (!response.success) throw new Error(response.error);
+      return true;
+    } catch (error) {
+      console.error('Toggle favorite failed', error);
+      // Revert
+      const revertList = (list: Agent[]) => list.map(a => a.id === agent.id ? { ...a, is_favorited: isFav } : a);
+      set(state => ({
+        agents: revertList(state.agents),
+        myAgents: revertList(state.myAgents),
+        myFavorites: isFav 
+          ? [...state.myFavorites, { ...currentAgent, is_favorited: true }] 
+          : state.myFavorites.filter(a => a.id !== agent.id)
+      }));
+      return false;
     }
   },
 
@@ -167,6 +236,35 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         error: errorMessage 
       });
       return { success: false, message: errorMessage };
+    }
+  },
+
+  deleteAgent: async (id: string) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      const response = await apiRequest<ApiResponse<void>>(API_ENDPOINTS.agents.delete(id), {
+        method: 'DELETE',
+      });
+
+      if (response.success) {
+        set((state) => ({
+          myAgents: state.myAgents.filter(a => a.id !== id),
+          agents: state.agents.filter(a => a.id !== id),
+          isLoading: false,
+          error: null
+        }));
+        return true;
+      } else {
+        throw new Error(response.error || 'Failed to delete agent');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '删除智能体失败';
+      set({ 
+        isLoading: false, 
+        error: errorMessage 
+      });
+      return false;
     }
   },
 

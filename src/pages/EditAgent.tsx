@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Bot, Upload, Loader2, ImageIcon, ArrowLeft, Save, Send, CheckCircle } from 'lucide-react';
+import { Bot, Upload, Loader2, ImageIcon, ArrowLeft, Save, Send, CheckCircle, Tag, Sparkles } from 'lucide-react';
 import { useAgentsStore } from '../stores/agents';
 import { Agent } from '../../shared/types';
 import { supabase } from '../lib/utils';
@@ -13,6 +13,7 @@ interface EditAgentFormData {
   description: string;
   system_prompt: string;
   avatar_url: string;
+  tag: string;
 }
 
 const EditAgent: React.FC = () => {
@@ -26,6 +27,7 @@ const EditAgent: React.FC = () => {
   const { fetchAgent, updateAgent, isLoading, error } = useAgentsStore();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [fetching, setFetching] = useState(true);
 
@@ -34,7 +36,8 @@ const EditAgent: React.FC = () => {
       name: '',
       description: '',
       system_prompt: '',
-      avatar_url: ''
+      avatar_url: '',
+      tag: ''
     }
   });
 
@@ -67,7 +70,8 @@ const EditAgent: React.FC = () => {
             name: displayAgent.name,
             description: displayAgent.description || '',
             system_prompt: displayAgent.system_prompt,
-            avatar_url: displayAgent.avatar_url || ''
+            avatar_url: displayAgent.avatar_url || '',
+            tag: displayAgent.tags?.[0] || ''
           });
           
           if (draft) {
@@ -125,6 +129,36 @@ const EditAgent: React.FC = () => {
     }
   };
 
+  const handleAIGenerate = () => {
+    const description = watch('description');
+    if (!description || description.trim() === '') {
+      setSubmitError('请先填写简介描述，AI将根据描述生成头像');
+      return;
+    }
+    
+    setIsGenerating(true);
+    setSubmitError(null);
+    
+    // 优化 Prompt：使用 icon/logo 风格关键词，避免生成写实人像
+    // 模仿 Coze 风格：3D 图标、渐变背景、极简主义
+    const prompt = encodeURIComponent(`minimalist 3d app icon of ${description}, cute, gradient background, high quality, soft lighting, clay style`);
+    // 添加随机种子以确保每次点击都能生成新的
+    const seed = Math.random().toString(36).substring(7);
+    const aiAvatarUrl = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=512&seed=${seed}&nologo=true`;
+    
+    // 预加载图片
+    const img = new Image();
+    img.src = aiAvatarUrl;
+    img.onload = () => {
+      setValue('avatar_url', aiAvatarUrl);
+      setIsGenerating(false);
+    };
+    img.onerror = () => {
+      setSubmitError('图片生成失败，请重试');
+      setIsGenerating(false);
+    };
+  };
+
   const [actionType, setActionType] = useState<'save' | 'publish'>('save');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [modalConfig, setModalConfig] = useState<{
@@ -145,12 +179,18 @@ const EditAgent: React.FC = () => {
     onConfirm: () => {},
   });
 
-  const onSubmit = async (data: EditAgentFormData) => {
+  const doSubmit = async (data: EditAgentFormData) => {
     if (!id) return;
     setSubmitError(null);
     setSaveSuccess(false);
     
-    const result = await updateAgent(id, data, actionType);
+    const { tag, ...rest } = data;
+    const updateData = {
+      ...rest,
+      tags: [tag]
+    };
+    
+    const result = await updateAgent(id, updateData, actionType);
     
     if (result.success) {
       if (actionType === 'publish') {
@@ -174,6 +214,22 @@ const EditAgent: React.FC = () => {
       }
     } else {
       setSubmitError(result.message || '更新失败，请重试');
+    }
+  };
+
+  const onSubmit = async (data: EditAgentFormData) => {
+    if (actionType === 'publish' && user?.role === 'admin') {
+      setModalConfig({
+        isOpen: true,
+        title: '确认发布',
+        message: '您是管理员，发布更新将直接上线，无需审核。确定要继续吗？',
+        type: 'info',
+        confirmText: '确认发布',
+        showCancel: true,
+        onConfirm: () => doSubmit(data),
+      });
+    } else {
+      doSubmit(data);
     }
   };
 
@@ -316,6 +372,25 @@ const EditAgent: React.FC = () => {
                     >
                       随机生成
                     </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={handleAIGenerate}
+                      className="flex items-center text-sm text-purple-600 hover:text-purple-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={readonly || isGenerating}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          生成中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3 h-3 mr-1" />
+                          AI生成
+                        </>
+                      )}
+                    </button>
                   </div>
                   
                   {/* URL Input */}
@@ -336,6 +411,40 @@ const EditAgent: React.FC = () => {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* 标签分类 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                智能体分类 <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {['效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'].map((tagOption) => (
+                  <label
+                    key={tagOption}
+                    className={`
+                      relative flex items-center justify-center px-4 py-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all
+                      ${watch('tag') === tagOption 
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500' 
+                        : 'border-gray-200 text-gray-700'}
+                      ${readonly ? 'pointer-events-none opacity-75' : ''}
+                    `}
+                  >
+                    <input
+                      type="radio"
+                      value={tagOption}
+                      className="sr-only"
+                      {...register('tag', { required: '请选择智能体分类' })}
+                      disabled={readonly}
+                    />
+                    <Tag className={`w-4 h-4 mr-2 ${watch('tag') === tagOption ? 'text-blue-500' : 'text-gray-400'}`} />
+                    <span className="text-sm font-medium">{tagOption}</span>
+                  </label>
+                ))}
+              </div>
+              {errors.tag && (
+                <p className="mt-1 text-sm text-red-500">{errors.tag.message}</p>
+              )}
             </div>
 
             {/* System Prompt */}

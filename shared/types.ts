@@ -22,7 +22,13 @@ export interface Agent {
   creator_id?: string;
   status?: 'private' | 'pending' | 'public';
   category?: string;
+  tags?: string[];
+  creator?: {
+    name: string;
+    email?: string;
+  };
   has_pending_revision?: boolean; // 前端辅助字段，表示是否有待审核的修改
+  is_favorited?: boolean; // 前端辅助字段，表示是否已收藏
 }
 
 // 智能体修订版本
@@ -53,6 +59,7 @@ export interface CreateAgentRequest {
   description?: string;
   system_prompt: string;
   avatar_url?: string;
+  tags?: string[];
   status?: 'private' | 'public'; // 用户只能请求 private 或 public（实际上可能是 pending）
 }
 

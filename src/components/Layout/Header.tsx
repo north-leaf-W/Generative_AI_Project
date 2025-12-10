@@ -6,14 +6,20 @@ import { useNotificationsStore } from '../../stores/notifications';
 
 const Header: React.FC = () => {
   const { user, logout } = useAuthStore();
-  const { unreadCount, fetchNotifications } = useNotificationsStore();
+  const { unreadCount, startPolling, stopPolling } = useNotificationsStore();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
-      fetchNotifications();
+      startPolling();
+    } else {
+      stopPolling();
     }
-  }, [user, fetchNotifications]);
+    
+    return () => {
+      stopPolling();
+    };
+  }, [user, startPolling, stopPolling]);
 
   const handleLogout = () => {
     logout();

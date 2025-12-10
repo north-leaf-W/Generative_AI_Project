@@ -34,12 +34,33 @@ const FloatingElement = ({ delay = 0, x = 0, y = 0, className = '' }: FloatingEl
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { user, checkAuth } = useAuthStore();
-  const { agents, isLoading, error, fetchAgents } = useAgentsStore();
+  const { agents, isLoading, error, fetchAgents, fetchFavorites } = useAgentsStore();
+  const [activeTag, setActiveTag] = React.useState('全部');
+
+  const tags = ['全部', '效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'];
 
   useEffect(() => {
     checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
     fetchAgents();
-  }, [checkAuth, fetchAgents]);
+  }, [fetchAgents]);
+
+  useEffect(() => {
+    if (user) {
+      fetchFavorites();
+    }
+  }, [user, fetchFavorites]);
+
+  const handleTagClick = (tag: string) => {
+    setActiveTag(tag);
+  };
+
+  const filteredAgents = React.useMemo(() => {
+    if (activeTag === '全部') return agents;
+    return agents.filter(agent => agent.tags && agent.tags.includes(activeTag));
+  }, [agents, activeTag]);
 
   const features = [
     {
@@ -59,7 +80,7 @@ const Home: React.FC = () => {
     }
   ];
 
-  if (isLoading) {
+  if (isLoading && agents.length === 0) {
     return (
       <div className="min-h-screen bg-transparent flex items-center justify-center">
         <div className="text-center">
@@ -149,10 +170,27 @@ const Home: React.FC = () => {
             className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-gray-900 mb-4">可用智能体</h2>
-            <p className="text-lg text-gray-600">选择您想要对话的AI智能体</p>
+            <p className="text-lg text-gray-600 mb-8">选择您想要对话的AI智能体</p>
+            
+            {/* 标签筛选 */}
+            <div className="flex flex-wrap justify-center gap-2 max-w-2xl mx-auto">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => handleTagClick(tag)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                    activeTag === tag
+                      ? 'bg-blue-600 text-white shadow-md transform scale-105'
+                      : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
           </motion.div>
           
-          {agents.length === 0 ? (
+          {filteredAgents.length === 0 ? (
             <div className="text-center py-12">
               <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">暂无可用智能体</h3>
@@ -160,7 +198,7 @@ const Home: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {agents.map((agent) => (
+              {filteredAgents.map((agent) => (
                 <AgentCard key={agent.id} agent={agent} />
               ))}
             </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle } from 'lucide-react';
+import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
@@ -15,7 +15,7 @@ const Chat: React.FC = () => {
   const location = useLocation();
   const mode = (location.state as { mode?: 'public' | 'dev' })?.mode || 'public';
   const { user } = useAuthStore();
-  const { agents, myAgents, fetchAgents, fetchAgent } = useAgentsStore();
+  const { agents, myAgents, fetchAgents, fetchAgent, toggleFavorite } = useAgentsStore();
   const { 
     sessions, 
     currentSession, 
@@ -343,6 +343,17 @@ const Chat: React.FC = () => {
                         {(currentAgent as any).draft_revision && ' (调试模式)'}
                       </span>
                     )}
+                    <button
+                      onClick={() => toggleFavorite(currentAgent)}
+                      className="ml-2 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                      title={currentAgent.is_favorited ? "取消收藏" : "收藏智能体"}
+                    >
+                      <Star
+                        className={`w-5 h-5 transition-colors ${
+                          currentAgent.is_favorited ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
+                        }`}
+                      />
+                    </button>
                   </h1>
                   <div className="text-xs md:text-sm text-green-600 flex items-center space-x-1">
                     <span className="w-2 h-2 bg-green-500 rounded-full inline-block" />

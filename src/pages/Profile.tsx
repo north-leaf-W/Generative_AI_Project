@@ -236,7 +236,7 @@ const Profile: React.FC = () => {
                 key={notification.id} 
                 className={`p-4 rounded-lg border transition-colors ${
                   notification.is_read 
-                    ? 'bg-white border-gray-200' 
+                    ? 'bg-gray-50 border-gray-200 text-gray-600' 
                     : 'bg-blue-50 border-blue-200'
                 }`}
               >

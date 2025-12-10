@@ -2,49 +2,107 @@ import express from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { optionalAuth, authenticateToken } from '../middleware/auth.js';
 import { ApiResponse, Agent, CreateAgentRequest } from '../../shared/types.js';
+import { sendNotification } from './notifications.js';
 
 const router = express.Router();
 
-import { sendNotification } from './notifications.js';
+// Helper to get favorites map
+async function getFavoritesMap(userId: string) {
+  const { data } = await supabase
+    .from('favorites')
+    .select('agent_id')
+    .eq('user_id', userId);
+  const set = new Set<string>();
+  if (data) data.forEach((f: any) => set.add(f.agent_id));
+  return set;
+}
 
 // 获取所有智能体列表（公开+我的）
 router.get('/', optionalAuth, async (req, res) => {
   try {
     const userId = req.user?.id;
     
+    // Check if user is admin
+    let isAdmin = false;
+    if (userId) {
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('role')
+        .eq('id', userId)
+        .single();
+      if (user?.role === 'admin') isAdmin = true;
+    }
+
     // 构建查询
     let query = supabase
       .from('agents')
       .select('*')
-      .eq('is_active', true);
-      
-    // 如果已登录，使用 OR 条件：公开的 OR 我创建的
-    // 由于 supabase js sdk 的 OR 语法限制，这里我们简化逻辑：
-    // 如果未登录，只查 public
-    // 如果已登录，我们依靠 RLS (Row Level Security) 来过滤
-    // 但是服务端使用的是 service role key (supabaseAdmin) 还是 anon key (supabase)?
-    // config/supabase.ts 导出的是 supabase (anon) 和 supabaseAdmin (service)
-    // 这里应该使用 supabase (anon) 配合 RLS，或者手动构建查询条件
-    
-    // 为了利用 RLS，我们需要传递用户 token，但这里是后端接口
-    // 简单的做法是：
-    // 1. 查找 status = 'public'
-    
-    const { data: publicAgents, error: publicError } = await supabase
-      .from('agents')
-      .select('*')
       .eq('is_active', true)
-      .eq('status', 'public')
-      .order('created_at', { ascending: true });
+      .eq('status', 'public');
+      
+    if (req.query.tag) {
+      // tags 是数组，使用 contains
+      query = query.contains('tags', [req.query.tag]);
+    }
+
+    query = query.order('created_at', { ascending: true });
+      
+    const { data: publicAgents, error: publicError } = await query;
       
     if (publicError) throw publicError;
     
-    let allAgents = publicAgents || [];
+    let allAgents: Agent[] = publicAgents || [];
     
-    // 智能体广场只显示已发布的智能体，不需要合并“我的智能体”
-    // "我的智能体"在单独的页面显示
+    // 如果是管理员，填充作者信息和检查待审核版本
+    if (isAdmin && allAgents.length > 0) {
+      // 手动获取作者信息，避免依赖外键约束
+      const creatorIds = [...new Set(allAgents.map(a => a.creator_id).filter(id => id))];
+      
+      if (creatorIds.length > 0) {
+        const { data: creators } = await supabaseAdmin
+          .from('users')
+          .select('id, name, email')
+          .in('id', creatorIds);
+          
+        if (creators) {
+          const creatorMap = new Map(creators.map(c => [c.id, c]));
+          allAgents = allAgents.map(agent => ({
+            ...agent,
+            creator: agent.creator_id ? creatorMap.get(agent.creator_id) : undefined
+          }));
+        }
+      }
 
-  const response: ApiResponse<Agent[]> = {
+      const agentIds = allAgents.map(a => a.id);
+      const { data: revisions } = await supabaseAdmin
+        .from('agent_revisions')
+        .select('agent_id')
+        .in('agent_id', agentIds)
+        .eq('status', 'pending');
+        
+      if (revisions && revisions.length > 0) {
+        const revisionSet = new Set(revisions.map(r => r.agent_id));
+        allAgents = allAgents.map(agent => ({
+          ...agent,
+          has_pending_revision: revisionSet.has(agent.id)
+        }));
+      }
+    }
+    
+    // 如果已登录，检查收藏状态
+    if (userId) {
+      try {
+        const favoritesMap = await getFavoritesMap(userId);
+        allAgents = allAgents.map(agent => ({
+          ...agent,
+          is_favorited: favoritesMap.has(agent.id)
+        }));
+      } catch (err) {
+        console.warn('Failed to fetch favorites', err);
+      }
+    }
+    
+    const response: ApiResponse<Agent[]> = {
       success: true,
       data: allAgents
     };
@@ -56,6 +114,80 @@ router.get('/', optionalAuth, async (req, res) => {
       success: false, 
       error: `Failed to fetch agents: ${error.message || 'Internal server error'}`
     });
+  }
+});
+
+// 获取我的收藏列表
+router.get('/favorites', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    
+    // Join favorites and agents
+    const { data, error } = await supabase
+      .from('favorites')
+      .select('agent_id, agents (*)')
+      .eq('user_id', userId);
+      
+    if (error) throw error;
+    
+    // Transform data: extract agent from join result and add is_favorited
+    const agents = (data || [])
+      .map((item: any) => {
+        if (!item.agents) return null;
+        return {
+          ...item.agents,
+          is_favorited: true
+        } as Agent;
+      })
+      .filter((a): a is Agent => a !== null && a.is_active); 
+    
+    res.json({ success: true, data: agents });
+  } catch (error: any) {
+    console.error('Get favorites error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 收藏智能体
+router.post('/:id/favorite', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const agentId = req.params.id;
+    
+    const { error } = await supabase
+      .from('favorites')
+      .insert({ user_id: userId, agent_id: agentId });
+      
+    if (error) {
+      // Ignore duplicate key error
+      if (error.code !== '23505') throw error;
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Add favorite error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 取消收藏智能体
+router.delete('/:id/favorite', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const agentId = req.params.id;
+    
+    const { error } = await supabase
+      .from('favorites')
+      .delete()
+      .eq('user_id', userId)
+      .eq('agent_id', agentId);
+      
+    if (error) throw error;
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Remove favorite error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -76,7 +208,8 @@ router.get('/my', authenticateToken, async (req, res) => {
     // 检查是否有待审核的修改
     const agentIds = (agents || []).map(a => a.id);
     if (agentIds.length > 0) {
-      const { data: revisions } = await supabase
+      // 使用 supabaseAdmin 绕过 RLS，因为标准 supabase 客户端可能没有用户上下文
+      const { data: revisions } = await supabaseAdmin
         .from('agent_revisions')
         .select('agent_id')
         .in('agent_id', agentIds)
@@ -91,10 +224,17 @@ router.get('/my', authenticateToken, async (req, res) => {
         });
       }
     }
+    
+    // Add is_favorited info (even for own agents)
+    const favoritesMap = await getFavoritesMap(userId);
+    const agentsWithFav = (agents || []).map(agent => ({
+      ...agent,
+      is_favorited: favoritesMap.has(agent.id)
+    }));
 
     const response: ApiResponse<Agent[]> = {
       success: true,
-      data: agents || []
+      data: agentsWithFav
     };
 
     res.json(response);
@@ -111,7 +251,7 @@ router.get('/my', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
-    const { name, description, system_prompt, avatar_url, status }: CreateAgentRequest = req.body;
+    const { name, description, system_prompt, avatar_url, status, tags }: CreateAgentRequest & { tags?: string[] } = req.body;
 
     if (!name || !system_prompt) {
       return res.status(400).json({
@@ -141,11 +281,11 @@ router.post('/', authenticateToken, async (req, res) => {
       creator_id: userId,
       status: finalStatus || 'private', // 默认为 private
       is_active: true,
-      config: {}
+      config: {},
+      tags: tags || []
     };
 
-    // 使用 supabaseAdmin 绕过 RLS 插入，或者确保 RLS 允许插入
-    // 这里使用 supabaseAdmin 确保操作成功，因为我们自己在代码里控制了 creator_id
+    // 使用 supabaseAdmin 绕过 RLS 插入
     const { data, error } = await supabaseAdmin
       .from('agents')
       .insert(newAgent)
@@ -207,7 +347,7 @@ router.get('/pending', authenticateToken, async (req, res) => {
 
     const { data: agents, error } = await supabaseAdmin
       .from('agents')
-      .select('*, creator:users(name, email)') // 关联查询创建者信息
+      .select('*, creator:users!creator_id(name, email)') // 关联查询创建者信息，指定外键以避免歧义
       .eq('status', 'pending')
       .eq('is_active', true)
       .order('created_at', { ascending: false });
@@ -217,28 +357,26 @@ router.get('/pending', authenticateToken, async (req, res) => {
     // 同时获取待审核的修订版本
     const { data: revisions, error: revisionError } = await supabaseAdmin
       .from('agent_revisions')
-      .select('*, agent:agents(name, status)')
+      .select('*, agent:agents(*)')
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
       
     if (revisionError) throw revisionError;
 
-    // 将 revisions 转换为统一的格式返回，或者分别返回
-    // 这里我们简单地将 revision 视为一种特殊的 "pending agent"
     const pendingRevisions = (revisions || []).map(r => ({
-      id: r.agent_id, // 使用 agent_id 作为标识，但在操作时需要区分是 revision
+      ...r.agent, // 基础数据使用原始 agent 数据
+      id: r.agent_id, // 确保 ID 正确
       revision_id: r.id,
-      name: r.agent.name,
-      description: '修改审核',
-      status: 'pending_revision',
-      created_at: r.created_at,
-      creator: { name: 'Unknown', email: '' } // 暂不关联 creator，或者需要 join
+      status: 'pending_revision', // 覆盖状态
+      created_at: r.created_at, // 使用修订版的创建时间
+      creator: { name: 'Unknown', email: '' },
+      original_agent: r.agent, // 保存原始 agent 信息用于对比
+      ...r.changes // 展开修改内容，覆盖原始值
     }));
 
     // 获取 revision 的 creator 信息
     if (pendingRevisions.length > 0) {
       for (const rev of pendingRevisions) {
-         // 这里可以优化查询，暂时循环查
          const { data: creator } = await supabaseAdmin.from('users').select('name, email').eq('id', (revisions?.find(r => r.id === rev.revision_id) as any).creator_id).single();
          if (creator) rev.creator = creator;
       }
@@ -275,15 +413,32 @@ router.get('/:id', optionalAuth, async (req, res) => {
       });
     }
 
-    // 权限检查：如果是公开的，或者是拥有者，则允许访问
+    // Check if user is admin
+    let isAdmin = false;
+    if (userId) {
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('role')
+        .eq('id', userId)
+        .single();
+      if (user?.role === 'admin') isAdmin = true;
+    }
+
+    // 权限检查：如果是公开的，或者是拥有者，或者是管理员，则允许访问
     const isOwner = userId && agent.creator_id === userId;
     const isPublic = agent.status === 'public';
 
-    if (!isPublic && !isOwner) {
+    if (!isPublic && !isOwner && !isAdmin) {
        return res.status(403).json({ 
         success: false, 
         error: 'Unauthorized access to private agent' 
       });
+    }
+    
+    // Check favorite status
+    if (userId) {
+      const favoritesMap = await getFavoritesMap(userId);
+      (agent as any).is_favorited = favoritesMap.has(agent.id);
     }
     
     // 如果是创建者，检查是否有草稿版本的修订
@@ -299,8 +454,6 @@ router.get('/:id', optionalAuth, async (req, res) => {
         
       if (draftRevision) {
         (agent as any).draft_revision = draftRevision;
-        // 自动合并草稿内容用于预览（可选，或者前端处理）
-        // 这里为了保持一致性，仅附加 draft_revision 对象，前端决定是否显示预览内容
       }
     }
 
@@ -319,11 +472,51 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
+// 删除智能体
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    // 检查权限
+    const { data: agent, error: fetchError } = await supabaseAdmin
+      .from('agents')
+      .select('creator_id, status')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !agent) {
+      return res.status(404).json({ success: false, error: 'Agent not found' });
+    }
+
+    const { data: user } = await supabaseAdmin.from('users').select('role').eq('id', userId).single();
+    const isAdmin = user?.role === 'admin';
+
+    if (agent.creator_id !== userId && !isAdmin) {
+      return res.status(403).json({ success: false, error: 'Unauthorized to delete this agent' });
+    }
+
+    // 执行删除
+    const { error: deleteError } = await supabaseAdmin
+      .from('agents')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw deleteError;
+
+    res.json({ success: true, message: 'Agent deleted successfully' });
+
+  } catch (error: any) {
+    console.error('Delete agent error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 更新智能体（用户操作）
 router.patch('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, system_prompt, avatar_url, config, action = 'save' } = req.body; // action: 'save' | 'publish'
+    const { name, description, system_prompt, avatar_url, config, tags, action = 'save' } = req.body; // action: 'save' | 'publish'
     const userId = req.user!.id;
 
     // 使用 admin 客户端以绕过 RLS (因为我们已经手动检查了 creator_id)
@@ -337,12 +530,47 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Agent not found' });
     }
 
-      // 2. 检查权限
-      if (currentAgent.creator_id !== userId) {
+    // 2. 检查权限
+      const { data: user } = await supabaseAdmin.from('users').select('role').eq('id', userId).single();
+      const isAdmin = user?.role === 'admin';
+
+      if (currentAgent.creator_id !== userId && !isAdmin) {
         return res.status(403).json({ success: false, error: '无权修改此智能体' });
       }
 
       // 3. 根据状态处理
+      // 如果是管理员修改任何状态的智能体，且 action 是 publish，直接更新并发布，跳过审核
+      if (isAdmin && action === 'publish') {
+         const updateData: any = {};
+         if (name !== undefined) updateData.name = name;
+         if (description !== undefined) updateData.description = description;
+         if (system_prompt !== undefined) updateData.system_prompt = system_prompt;
+         if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+         if (config !== undefined) updateData.config = config;
+         if (tags !== undefined) updateData.tags = tags;
+         
+         // 强制设为 public
+         updateData.status = 'public';
+         
+         const { data: updatedAgent, error: updateError } = await supabaseAdmin
+           .from('agents')
+           .update(updateData)
+           .eq('id', id)
+           .select()
+           .single();
+           
+         if (updateError) throw updateError;
+         
+         // 如果有相关的 pending revision，将其标记为 approved 或 deleted 以清除状态
+         await supabaseAdmin
+            .from('agent_revisions')
+            .update({ status: 'approved' })
+            .eq('agent_id', id)
+            .eq('status', 'pending');
+            
+         return res.json({ success: true, message: '智能体已直接发布（管理员权限）', data: updatedAgent });
+      }
+
       if (currentAgent.status === 'public') {
         // 如果是已发布的智能体，创建修订版本
         const changes: any = {};
@@ -351,6 +579,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
         if (system_prompt !== undefined) changes.system_prompt = system_prompt;
         if (avatar_url !== undefined) changes.avatar_url = avatar_url;
         if (config !== undefined) changes.config = config;
+        if (tags !== undefined) changes.tags = tags;
 
         const targetStatus = action === 'publish' ? 'pending' : 'draft';
         let revisionStatus = targetStatus;
@@ -418,6 +647,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
         if (system_prompt !== undefined) updateData.system_prompt = system_prompt;
         if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
         if (config !== undefined) updateData.config = config;
+        if (tags !== undefined) updateData.tags = tags;
         
         // 如果 action 是 publish，且当前是 private，则改为 pending
         if (action === 'publish' && currentAgent.status === 'private') {
@@ -482,10 +712,18 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       const revisionId = req.body.revisionId;
       if (!revisionId) return res.status(400).json({ success: false, error: '缺少修订版本ID' });
 
+      // 获取智能体名称用于通知
+      const { data: agentData } = await supabaseAdmin
+        .from('agents')
+        .select('name')
+        .eq('id', id)
+        .single();
+      const agentName = agentData?.name || '智能体';
+
       if (status === 'public') {
         // 批准修订：应用更改到 agent 表，并将 revision 状态设为 approved (或删除)
         // 1. 获取修订内容
-        const { data: revision } = await supabase
+        const { data: revision } = await supabaseAdmin
           .from('agent_revisions')
           .select('*')
           .eq('id', revisionId)
@@ -494,7 +732,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
         if (!revision) return res.status(404).json({ success: false, error: '修订版本不存在' });
 
         // 2. 更新 agent
-        const { error: updateError } = await supabase
+        const { error: updateError } = await supabaseAdmin
           .from('agents')
           .update(revision.changes)
           .eq('id', id);
@@ -502,15 +740,20 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
         if (updateError) throw updateError;
 
         // 3. 删除 revision (或者标记为 approved，这里选择删除以保持 clean)
-        await supabase.from('agent_revisions').delete().eq('id', revisionId);
+        await supabaseAdmin.from('agent_revisions').delete().eq('id', revisionId);
         
         // 4. 发送通知
-        await sendNotification(revision.creator_id, 'audit_approved', '智能体修改审核通过', `您的智能体修改已通过审核并发布上线。`);
+        await sendNotification(
+          revision.creator_id, 
+          'audit_approved', 
+          '智能体修改审核通过', 
+          `您的智能体 "${agentName}" 的修改已通过审核并发布上线。`
+        );
         
         return res.json({ success: true, message: '审核通过，修改已应用' });
       } else if (status === 'private') { // 这里的 private 意味着拒绝
          // 拒绝修订
-         const { data: revision } = await supabase
+         const { data: revision } = await supabaseAdmin
           .from('agent_revisions')
           .update({ status: 'rejected' })
           .eq('id', revisionId)
@@ -518,7 +761,12 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
           .single();
 
          if (revision) {
-            await sendNotification(revision.creator_id, 'audit_rejected', '智能体修改审核未通过', `您的智能体修改审核未通过。`);
+            await sendNotification(
+              revision.creator_id, 
+              'audit_rejected', 
+              '智能体修改审核未通过', 
+              `您的智能体 "${agentName}" 的修改审核未通过。`
+            );
          }
          
          return res.json({ success: true, message: '审核已拒绝' });

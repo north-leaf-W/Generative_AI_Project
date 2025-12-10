@@ -11,7 +11,8 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
 
-    const { data: notifications, error } = await supabase
+    // 使用 supabaseAdmin 绕过 RLS，确保用户能看到自己的通知
+    const { data: notifications, error } = await supabaseAdmin
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
@@ -38,7 +39,7 @@ router.patch('/:id/read', authenticateToken, async (req, res) => {
     const userId = req.user!.id;
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('id', id)
@@ -63,7 +64,7 @@ router.patch('/read-all', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', userId)
