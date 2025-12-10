@@ -7,6 +7,7 @@ import { Agent } from '../../shared/types';
 import { supabase } from '../lib/utils';
 import { useAuthStore } from '../stores/auth';
 import ConfirmationModal from '../components/ConfirmationModal';
+import { apiRequest, API_ENDPOINTS } from '../config/api';
 
 interface EditAgentFormData {
   name: string;
@@ -129,7 +130,7 @@ const EditAgent: React.FC = () => {
     }
   };
 
-  const handleAIGenerate = () => {
+  const handleAIGenerate = async () => {
     const description = watch('description');
     if (!description || description.trim() === '') {
       setSubmitError('请先填写简介描述，AI将根据描述生成头像');
@@ -139,12 +140,48 @@ const EditAgent: React.FC = () => {
     setIsGenerating(true);
     setSubmitError(null);
     
-    // 优化 Prompt：使用 icon/logo 风格关键词，避免生成写实人像
-    // 模仿 Coze 风格：3D 图标、渐变背景、极简主义
-    const prompt = encodeURIComponent(`minimalist 3d app icon of ${description}, cute, gradient background, high quality, soft lighting, clay style`);
+    let finalPrompt = '';
+
+    try {
+      // 尝试调用后端优化 Prompt（将中文翻译为英文并优化）
+      const response = await apiRequest<{ success: boolean, data: { prompt: string } }>(
+        API_ENDPOINTS.ai.optimizePrompt,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description })
+        }
+      );
+
+      if (response.success && response.data.prompt) {
+        finalPrompt = response.data.prompt;
+      }
+    } catch (e) {
+      console.warn('Prompt optimization failed, using fallback', e);
+      // 降级策略：如果是中文，提示用户使用英文
+      if (/[\u4e00-\u9fa5]/.test(description)) {
+        setSubmitError('AI 翻译服务暂时不可用，请尝试使用英文描述');
+        setIsGenerating(false);
+        return;
+      }
+      finalPrompt = description;
+    }
+
+    // 如果优化失败且没有降级（理论上不会），使用原始描述
+    if (!finalPrompt) {
+        if (/[\u4e00-\u9fa5]/.test(description)) {
+          setSubmitError('AI 翻译服务暂时不可用，请尝试使用英文描述');
+          setIsGenerating(false);
+          return;
+        }
+        finalPrompt = description;
+    }
+
+    const prompt = encodeURIComponent(finalPrompt);
     // 添加随机种子以确保每次点击都能生成新的
     const seed = Math.random().toString(36).substring(7);
-    const aiAvatarUrl = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=512&seed=${seed}&nologo=true`;
+    // 使用 nologo=true 和 no-text 避免文字干扰，同时增加 negative_prompt
+    const aiAvatarUrl = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=512&seed=${seed}&nologo=true&enhance=false`;
     
     // 预加载图片
     const img = new Image();

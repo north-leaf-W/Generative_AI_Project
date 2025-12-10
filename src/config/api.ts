@@ -40,6 +40,9 @@ export const API_ENDPOINTS = {
     read: (id: string) => `${API_BASE_URL}/notifications/${id}/read`,
     readAll: `${API_BASE_URL}/notifications/read-all`,
   },
+  ai: {
+    optimizePrompt: `${API_BASE_URL}/ai/optimize-prompt`,
+  },
 } as const;
 
 // API 工具函数
