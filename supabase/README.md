@@ -110,6 +110,11 @@ Bucket: `agent-avatars`
 *   **Upload (Insert)**: 仅允许认证用户上传，且文件大小限制为 1MB。
 *   **Update/Delete**: 仅允许认证用户修改/删除**自己上传的**文件 (路径匹配用户 ID)。
 
+Bucket: `user-avatars`
+*   **Public Access**: 允许公开读取文件。
+*   **Upload (Insert)**: 允许用户上传 (放宽限制以支持部分客户端场景)，且文件大小限制为 1MB。
+*   **Update/Delete**: 仅允许认证用户修改/删除**自己上传的**文件 (路径匹配用户 ID)。
+
 ---
 
 ## 3. 迁移历史 (Migrations)
@@ -126,6 +131,7 @@ Bucket: `agent-avatars`
 8.  `20251210_add_tags_and_favorites.sql`: 添加标签系统和收藏功能。
 9.  `20251210_update_agent_tags_v2.sql`: 标签数据清洗与迁移（标准化分类）。
 10. `20251210_fix_storage_rls_v5.sql`: 修复存储桶 RLS 策略，限制文件大小为 1MB，确保用户只能管理自己的文件。
+11. `20251211_add_user_avatars_storage.sql`: 新增用户头像存储桶 `user-avatars`，配置 RLS 策略（公开读，宽松上传，严格更新/删除）。
 
 ## 4. 维护说明
 

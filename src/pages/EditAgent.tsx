@@ -8,6 +8,7 @@ import { supabase } from '../lib/utils';
 import { useAuthStore } from '../stores/auth';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { apiRequest, API_ENDPOINTS } from '../config/api';
+import Loading from '../components/Loading';
 
 interface EditAgentFormData {
   name: string;
@@ -392,7 +393,7 @@ const EditAgent: React.FC = () => {
   if (fetching) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <Loading size="lg" text="加载中..." />
       </div>
     );
   }

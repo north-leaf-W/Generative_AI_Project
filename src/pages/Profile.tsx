@@ -1,12 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/stores/auth';
-import { useNotificationsStore } from '@/stores/notifications';
-import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Bell, RefreshCcw, CheckCheck, Trash2 } from 'lucide-react';
-import ConfirmationModal from '../components/ConfirmationModal';
+import { Lock, User, Mail, CheckCircle, AlertCircle, Edit2, X, ChevronDown, ChevronRight, Camera, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/utils';
 
 const Profile: React.FC = () => {
   const { user, checkAuth, logout, changePassword, updateProfile, isLoading, error, clearError } = useAuthStore();
-  const { notifications, fetchNotifications, markAsRead, markAllAsRead, deleteNotification, clearAllNotifications, isLoading: notifLoading } = useNotificationsStore();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
@@ -14,53 +12,16 @@ const Profile: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
+  // 头像上传相关状态
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     checkAuth();
     clearError();
-    fetchNotifications();
-  }, [checkAuth, clearError, fetchNotifications]);
-
-  const handleRefreshNotifications = async () => {
-    setIsRefreshing(true);
-    try {
-      await fetchNotifications();
-    } finally {
-      // 延迟一点结束动画，让用户能感知到刷新
-      setTimeout(() => setIsRefreshing(false), 500);
-    }
-  };
-
-  const handleMarkAsRead = async (id: string) => {
-    await markAsRead(id);
-  };
-  
-  const handleDeleteClick = async (id: string) => {
-    if (confirmDeleteId === id) {
-      await deleteNotification(id);
-      setConfirmDeleteId(null);
-    } else {
-      setConfirmDeleteId(id);
-      // 3秒后如果没有再次点击，自动取消确认状态
-      setTimeout(() => {
-        setConfirmDeleteId((current) => (current === id ? null : current));
-      }, 3000);
-    }
-  };
-
-  const handleClearAllClick = () => {
-    setIsClearAllModalOpen(true);
-  };
-
-  const handleConfirmClearAll = async () => {
-    await clearAllNotifications();
-    setIsClearAllModalOpen(false);
-  };
-
+  }, [checkAuth, clearError]);
 
   const onChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,12 +42,64 @@ const Profile: React.FC = () => {
     }
     
     try {
-      await updateProfile(newName);
+      await updateProfile({ name: newName });
       setIsEditingName(false);
       setNameSuccess('用户名已更新');
       // 3秒后自动清除成功提示
       setTimeout(() => setNameSuccess(''), 3000);
     } catch {}
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    // 重置状态
+    setAvatarError(null);
+    setIsUploadingAvatar(true);
+
+    try {
+      // 1. 验证文件大小 (1MB)
+      if (file.size > 1024 * 1024) {
+        throw new Error('头像大小不能超过 1MB');
+      }
+
+      // 2. 验证文件类型
+      if (!file.type.startsWith('image/')) {
+        throw new Error('请上传图片文件');
+      }
+
+      // 3. 上传到 Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('user-avatars')
+        .upload(filePath, file, {
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      // 4. 获取公开链接
+      const { data } = supabase.storage
+        .from('user-avatars')
+        .getPublicUrl(filePath);
+
+      // 5. 更新用户资料
+      await updateProfile({ avatar_url: data.publicUrl });
+      
+    } catch (err: any) {
+      console.error('Avatar upload failed:', err);
+      setAvatarError(err.message || '头像上传失败，请重试');
+    } finally {
+      setIsUploadingAvatar(false);
+      // 清空 input，允许重复上传同一文件
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   if (!user) {
@@ -102,82 +115,121 @@ const Profile: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-8">
-      <section className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">个人中心</h1>
+      
+      <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
         <h2 className="text-xl font-semibold text-gray-900 mb-4">账户信息</h2>
-        <div className="space-y-3">
-          <div className="flex items-center space-x-2 text-gray-700 h-9">
-            <User className="w-4 h-4 flex-shrink-0" />
+        <div className="space-y-4">
+          {/* Avatar Section */}
+          <div className="flex items-center space-x-4 mb-6">
+            <div className="relative group">
+              <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-10 h-10 text-gray-400" />
+                )}
+                {isUploadingAvatar && (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-white animate-spin" />
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingAvatar}
+                className="absolute bottom-0 right-0 p-1.5 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50 transition-colors"
+                title="更换头像"
+              >
+                <Camera className="w-4 h-4 text-gray-600" />
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-900">头像</p>
+              <p className="text-xs text-gray-500 mt-1">支持 JPG, PNG格式，最大 1MB</p>
+              {avatarError && (
+                <p className="text-xs text-red-600 mt-1">{avatarError}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 text-gray-700 h-9">
+            <User className="w-5 h-5 flex-shrink-0 text-gray-400" />
             {isEditingName ? (
               <form onSubmit={handleUpdateName} className="flex items-center space-x-2 flex-1">
                 <input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   autoFocus
                   placeholder="输入新用户名"
                 />
                 <button
                   type="submit"
-                  className="p-1 text-green-600 hover:bg-green-50 rounded"
+                  className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                   disabled={isLoading}
                 >
-                  <CheckCircle className="w-4 h-4" />
+                  <CheckCircle className="w-5 h-5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsEditingName(false)}
-                  className="p-1 text-red-600 hover:bg-red-50 rounded"
+                  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </form>
             ) : (
-              <div className="flex items-center space-x-2 group">
-                <span>{user.name}</span>
+              <div className="flex items-center space-x-3 group">
+                <span className="text-lg font-medium">{user.name}</span>
                 <button
                   onClick={() => {
                     setNewName(user.name);
                     setIsEditingName(true);
                   }}
-                  className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                   title="修改用户名"
                 >
-                  <Edit2 className="w-3.5 h-3.5" />
+                  <Edit2 className="w-4 h-4" />
                 </button>
                 {nameSuccess && (
                   <span className="text-sm text-green-600 flex items-center animate-fade-in-out">
-                    <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                    <CheckCircle className="w-4 h-4 mr-1" />
                     {nameSuccess}
                   </span>
                 )}
               </div>
             )}
           </div>
-          <div className="flex items-center space-x-2 text-gray-700 h-9">
-            <Mail className="w-4 h-4 flex-shrink-0" />
-            <span>{user.email}</span>
+          <div className="flex items-center space-x-3 text-gray-700 h-9">
+            <Mail className="w-5 h-5 flex-shrink-0 text-gray-400" />
+            <span className="text-gray-600">{user.email}</span>
             {user.role === 'admin' && (
-              <span className="px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full ml-2">
+              <span className="px-2.5 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full ml-2">
                 管理员
               </span>
             )}
           </div>
         </div>
-        <button
-          onClick={logout}
-          className="mt-6 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-        >
-          退出登录
-        </button>
       </section>
 
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
         <button
           onClick={() => setIsChangePasswordOpen(!isChangePasswordOpen)}
           className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition-colors"
         >
-          <h2 className="text-xl font-semibold text-gray-900">修改密码</h2>
+          <div className="flex items-center space-x-3">
+            <Lock className="w-5 h-5 text-gray-400" />
+            <h2 className="text-xl font-semibold text-gray-900">修改密码</h2>
+          </div>
           {isChangePasswordOpen ? (
             <ChevronDown className="w-5 h-5 text-gray-500" />
           ) : (
@@ -186,10 +238,10 @@ const Profile: React.FC = () => {
         </button>
         
         {isChangePasswordOpen && (
-          <div className="p-6 pt-0 border-t border-gray-100">
-            <form onSubmit={onChangePassword} className="space-y-4 mt-6">
+          <div className="p-6 pt-0 border-t border-gray-100 bg-gray-50/30">
+            <form onSubmit={onChangePassword} className="space-y-5 mt-6 max-w-md">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">当前密码</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">当前密码</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
@@ -197,12 +249,12 @@ const Profile: React.FC = () => {
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                     required
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">新密码（至少6位）</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">新密码（至少6位）</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
@@ -211,7 +263,7 @@ const Profile: React.FC = () => {
                     onChange={(e) => setNewPassword(e.target.value)}
                     minLength={6}
                     required
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-white"
                   />
                 </div>
               </div>
@@ -228,127 +280,19 @@ const Profile: React.FC = () => {
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50"
-              >
-                {isLoading ? '提交中...' : '更新密码'}
-              </button>
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 font-medium shadow-sm hover:shadow-md"
+                >
+                  {isLoading ? '提交中...' : '更新密码'}
+                </button>
+              </div>
             </form>
           </div>
         )}
       </section>
-
-      {/* 消息中心 */}
-      <section className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-            <Bell className="w-5 h-5 mr-2" />
-            消息中心
-          </h2>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={handleRefreshNotifications}
-              className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="刷新消息"
-            >
-              <RefreshCcw className={`w-4 h-4 ${notifLoading || isRefreshing ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              onClick={() => markAllAsRead()}
-              className="flex items-center space-x-1 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="全部已读"
-            >
-              <CheckCheck className="w-4 h-4" />
-              <span className="hidden sm:inline">全部已读</span>
-            </button>
-            <button
-              onClick={handleClearAllClick}
-              className="flex items-center space-x-1 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-              title="全部清空"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline">全部清空</span>
-            </button>
-          </div>
-        </div>
-        
-        {notifications.length > 0 ? (
-          <div className="space-y-4">
-            {notifications.map((notification) => (
-              <div 
-                key={notification.id} 
-                className={`p-4 rounded-lg border transition-colors ${
-                  notification.is_read 
-                    ? 'bg-gray-50 border-gray-200 text-gray-600' 
-                    : 'bg-blue-50 border-blue-200'
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <h3 className={`font-medium mb-1 ${notification.is_read ? 'text-gray-900' : 'text-blue-900'}`}>
-                      {notification.title}
-                    </h3>
-                    <p className={`text-sm mb-2 ${notification.is_read ? 'text-gray-500' : 'text-blue-700'}`}>
-                      {notification.content}
-                    </p>
-                    <span className="text-xs text-gray-400">
-                      {new Date(notification.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex items-center ml-4 space-x-2">
-                    {!notification.is_read && (
-                      <button
-                        onClick={() => handleMarkAsRead(notification.id)}
-                        className="p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
-                        title="标记为已读"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteClick(notification.id)}
-                      className={`p-1 rounded-full transition-colors ${
-                        confirmDeleteId === notification.id
-                          ? 'text-red-600 bg-red-100 hover:bg-red-200 ring-2 ring-red-200'
-                          : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
-                      }`}
-                      title={confirmDeleteId === notification.id ? "再次点击确认删除" : "删除消息"}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-           <div className="flex flex-col items-center justify-center py-12 text-gray-500 bg-gray-50 rounded-lg min-h-[200px]">
-             {notifLoading ? (
-               <>
-                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400 mb-3"></div>
-                 <p>加载中...</p>
-               </>
-             ) : (
-               <>
-                 <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                 <p>暂无消息</p>
-               </>
-             )}
-           </div>
-        )}
-      </section>
-
-      <ConfirmationModal
-        isOpen={isClearAllModalOpen}
-        onClose={() => setIsClearAllModalOpen(false)}
-        onConfirm={handleConfirmClearAll}
-        title="清空所有消息"
-        message="确定要删除所有消息吗？此操作无法撤销。"
-        type="danger"
-        confirmText="确认清空"
-      />
     </div>
   );
 };

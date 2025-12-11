@@ -215,7 +215,7 @@ router.post('/login', async (req, res) => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
-        .select('id, email, name, role, created_at, updated_at')
+        .select('id, email, name, avatar_url, role, created_at, updated_at')
         .single();
 
       if (createError) {
@@ -260,7 +260,7 @@ router.get('/me', authenticateToken, async (req, res) => {
     // 从数据库获取用户信息
     const { data: dbUser, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, name, role, created_at, updated_at')
+      .select('id, email, name, avatar_url, role, created_at, updated_at')
       .eq('id', userId)
       .single();
 
@@ -290,20 +290,36 @@ router.get('/me', authenticateToken, async (req, res) => {
 router.put('/update-profile', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.id;
-    const { name } = req.body as { name: string };
+    const { name, avatar_url } = req.body as { name?: string; avatar_url?: string };
 
-    if (!name || name.trim().length === 0) {
-      return res.status(400).json({ success: false, error: '请输入姓名' });
+    if ((!name || name.trim().length === 0) && !avatar_url) {
+      return res.status(400).json({ success: false, error: '没有需要更新的内容' });
     }
+
+    const updates: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (name && name.trim().length > 0) {
+      updates.name = name;
+    }
+
+    if (avatar_url !== undefined) {
+      updates.avatar_url = avatar_url;
+    }
+
+    // 在更新前，获取当前用户的旧头像 URL
+    const { data: currentUser } = await supabaseAdmin
+      .from('users')
+      .select('avatar_url')
+      .eq('id', userId)
+      .single();
 
     const { data: user, error } = await supabaseAdmin
       .from('users')
-      .update({ 
-        name,
-        updated_at: new Date().toISOString() 
-      })
+      .update(updates)
       .eq('id', userId)
-      .select('id, email, name, role, created_at, updated_at')
+      .select('id, email, name, avatar_url, role, created_at, updated_at')
       .single();
 
     if (error || !user) {
@@ -311,10 +327,37 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
       return res.status(500).json({ success: false, error: '更新个人资料失败' });
     }
 
-    // 同时也更新 Supabase Auth metadata
-    await supabaseAdmin.auth.admin.updateUserById(userId, {
-      user_metadata: { name }
-    });
+    // 如果头像更新成功，且旧头像存在且属于 Supabase Storage (user-avatars bucket)，则删除旧文件
+    if (
+      avatar_url !== undefined && 
+      currentUser?.avatar_url && 
+      currentUser.avatar_url !== avatar_url &&
+      currentUser.avatar_url.includes('/storage/v1/object/public/user-avatars/')
+    ) {
+      try {
+        // 提取路径: .../user-avatars/user_id/filename
+        const path = currentUser.avatar_url.split('/user-avatars/')[1];
+        if (path) {
+          console.log(`Deleting old avatar for user ${userId}: ${path}`);
+          const { error: deleteError } = await supabaseAdmin.storage
+            .from('user-avatars')
+            .remove([path]);
+          
+          if (deleteError) {
+            console.warn('Failed to delete old avatar:', deleteError);
+          }
+        }
+      } catch (e) {
+        console.warn('Exception while deleting old avatar:', e);
+      }
+    }
+
+    // 同时也更新 Supabase Auth metadata (如果修改了名字)
+    if (name) {
+      await supabaseAdmin.auth.admin.updateUserById(userId, {
+        user_metadata: { name }
+      });
+    }
 
     return res.json({ success: true, user });
   } catch (error) {

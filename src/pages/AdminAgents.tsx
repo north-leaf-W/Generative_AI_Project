@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, CheckCircle, XCircle, Loader2, RefreshCw, AlertTriangle, MessageSquare, FileText, EyeOff, ArrowRight } from 'lucide-react';
+import { ShieldCheck, CheckCircle, XCircle, RefreshCw, AlertTriangle, MessageSquare, FileText, EyeOff, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useAgentsStore } from '../stores/agents';
 import { Agent } from '../../shared/types';
 import ConfirmationModal from '../components/ConfirmationModal';
+import Loading from '../components/Loading';
 
 const AdminAgents: React.FC = () => {
   const navigate = useNavigate();
@@ -148,7 +149,7 @@ const AdminAgents: React.FC = () => {
   if (isLoading && pendingAgents.length === 0 && agents.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+        <Loading size="lg" />
       </div>
     );
   }

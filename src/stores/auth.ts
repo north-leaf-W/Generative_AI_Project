@@ -12,7 +12,7 @@ interface AuthState {
   // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<'verified' | 'pending_verification'>;
-  updateProfile: (name: string) => Promise<void>;
+  updateProfile: (data: { name?: string; avatar_url?: string }) => Promise<void>;
   changePassword: (oldPassword: string, newPassword: string) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (password: string, token: string) => Promise<void>;
@@ -88,22 +88,25 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      updateProfile: async (name: string) => {
+      updateProfile: async (data: { name?: string; avatar_url?: string }) => {
         set({ isLoading: true, error: null });
         try {
           const response = await apiRequest<{ user: User }>(API_ENDPOINTS.auth.updateProfile, {
             method: 'PUT',
-            body: JSON.stringify({ name })
+            body: JSON.stringify(data)
           });
           
           set(state => ({ 
             user: response.user,
-            isLoading: false,
-            error: null
+            isLoading: false, 
+            error: null 
           }));
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '更新个人信息失败';
-          set({ isLoading: false, error: errorMessage });
+          const errorMessage = error instanceof Error ? error.message : '更新个人资料失败';
+          set({ 
+            isLoading: false, 
+            error: errorMessage 
+          });
           throw error;
         }
       },

@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "@/pages/Home";
+import AgentSquare from "@/pages/AgentSquare";
+import Messages from "@/pages/Messages";
 import Chat from "@/pages/Chat";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -19,6 +21,8 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}> 
           <Route path="/" element={<Home />} />
+          <Route path="/square" element={<AgentSquare />} />
+          <Route path="/messages" element={<Messages />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />

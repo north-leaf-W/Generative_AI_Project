@@ -6,6 +6,7 @@ import { useAgentsStore } from '../stores/agents';
 import AgentCard from '../components/AgentCard';
 import { Agent } from '../../shared/types';
 import { motion } from 'framer-motion';
+import Loading from '../components/Loading';
 
 const MyAgents: React.FC = () => {
   const navigate = useNavigate();
@@ -113,7 +114,7 @@ const MyAgents: React.FC = () => {
   if (isLoading && myAgents.length === 0 && myFavorites.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <Loading size="lg" text="加载我的智能体..." />
       </div>
     );
   }

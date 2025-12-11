@@ -8,6 +8,7 @@ import { Agent, Session, Message } from '../../shared/types';
 import { AnimatePresence, motion } from 'framer-motion';
 import PixelAgents from '../components/PixelAgents';
 import ConfirmationModal from '../components/ConfirmationModal';
+import Loading from '../components/Loading';
 
 const Chat: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
@@ -183,8 +184,8 @@ const Chat: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">正在加载智能体信息</h2>
+          <Loading size="lg" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2 mt-4">正在加载智能体信息</h2>
           <p className="text-gray-600 mb-4">若长时间无响应，请点击重试</p>
           <button
             onClick={() => {
