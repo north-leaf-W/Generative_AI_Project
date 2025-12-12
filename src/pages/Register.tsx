@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, ArrowRight, MessageSquare } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight } from 'lucide-react';
+import Lottie from 'lottie-react';
+import loginAnimation from '../assets/animations/login-animation.json';
 import { useAuthStore } from '../stores/auth';
 import { AnimatedBackground } from '../components/Layout/AnimatedBackground';
 
@@ -52,8 +54,8 @@ const Register: React.FC = () => {
       <div className="max-w-md w-full relative z-10">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-            <MessageSquare className="w-8 h-8 text-white" />
+          <div className="w-32 h-32 mx-auto mb-4">
+            <Lottie animationData={loginAnimation} loop={true} />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">创建账户</h1>
           <p className="text-gray-600">注册新账户，开启AI对话之旅</p>
