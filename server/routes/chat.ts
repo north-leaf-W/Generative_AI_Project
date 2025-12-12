@@ -1,7 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { generateAIResponse } from '../services/langchain.js';
+import { generateAIResponse, generateSessionTitle } from '../services/langchain.js';
 import { ApiResponse, ChatRequest, Message } from '../../shared/types.js';
 
 const router = express.Router();
@@ -112,6 +112,19 @@ router.post('/stream', authenticateToken, async (req, res) => {
         .from('sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', sessionId);
+
+      // 检查是否需要生成标题（仅当历史消息为空时，即这是第一轮对话）
+      if (messageHistory.length === 0) {
+        // 异步生成标题，不阻塞响应
+        generateSessionTitle(message, aiResponse.trim()).then(async (newTitle) => {
+          if (newTitle && newTitle !== '新的对话') {
+            await supabaseAdmin
+              .from('sessions')
+              .update({ title: newTitle })
+              .eq('id', sessionId);
+          }
+        }).catch(err => console.error('Failed to auto-generate title:', err));
+      }
     } catch (e) {
       console.error('Post-stream save error:', e);
     }

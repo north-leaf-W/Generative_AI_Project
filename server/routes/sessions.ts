@@ -291,4 +291,60 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// 更新会话信息
+router.patch('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title } = req.body;
+    const userId = req.user!.id;
+
+    // 验证会话是否属于当前用户
+    const { data: session } = await supabaseAdmin
+      .from('sessions')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (!session) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Session not found' 
+      });
+    }
+
+    // 更新会话
+    const { data: updatedSession, error } = await supabaseAdmin
+      .from('sessions')
+      .update({ 
+        title,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to update session' 
+      });
+    }
+
+    const response: ApiResponse<Session> = {
+      success: true,
+      data: updatedSession
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error('Update session error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error' 
+    });
+  }
+});
+
 export default router;

@@ -145,3 +145,27 @@ export const generateAIResponse = async (
     return '';
   }
 };
+
+// 生成会话标题
+export const generateSessionTitle = async (
+  firstUserMessage: string,
+  firstAiResponse: string
+): Promise<string> => {
+  try {
+    const model = createDashScopeModel();
+    const prompt = `请根据以下对话内容，生成一个简短的标题（不超过10个字），直接返回标题文本，不要包含引号或其他内容。
+    
+用户：${firstUserMessage.slice(0, 200)}
+AI：${firstAiResponse.slice(0, 200)}`;
+
+    const response = await model.invoke([
+      new HumanMessage(prompt)
+    ]);
+
+    const title = typeof response.content === 'string' ? response.content : String(response.content);
+    return title.replace(/['"《》]/g, '').trim();
+  } catch (error) {
+    console.error('Title generation error:', error);
+    return '新的对话';
+  }
+};

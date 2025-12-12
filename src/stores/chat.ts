@@ -6,13 +6,16 @@ interface ChatState {
   sessions: Session[];
   currentSession: Session | null;
   messages: Message[];
+  messageCache: Record<string, Message[]>; // 添加消息缓存
   isLoading: boolean;
   isStreaming: boolean;
+  streamingSessionId: string | null;
   error: string | null;
   
   // Actions
   fetchSessions: (agentId?: string, mode?: 'public' | 'dev') => Promise<void>;
   createSession: (agentId: string, title?: string, mode?: 'public' | 'dev') => Promise<Session | null>;
+  updateSession: (sessionId: string, updates: Partial<Session>) => Promise<Session | null>;
   fetchMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -26,8 +29,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   currentSession: null,
   messages: [],
+  messageCache: {},
   isLoading: false,
   isStreaming: false,
+  streamingSessionId: null,
   error: null,
 
   reset: () => {
@@ -35,8 +40,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sessions: [],
       currentSession: null,
       messages: [],
+      messageCache: {},
       isLoading: false,
       isStreaming: false,
+      streamingSessionId: null,
       error: null
     });
   },
@@ -106,7 +113,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  updateSession: async (sessionId: string, updates: Partial<Session>) => {
+    // 乐观更新
+    set(state => ({
+      sessions: state.sessions.map(s => s.id === sessionId ? { ...s, ...updates } : s),
+      currentSession: state.currentSession?.id === sessionId ? { ...state.currentSession, ...updates } : state.currentSession
+    }));
+
+    try {
+      const response = await apiRequest<ApiResponse<Session>>(
+        API_ENDPOINTS.sessions.update(sessionId), 
+        {
+          method: 'PATCH',
+          body: JSON.stringify(updates),
+        }
+      );
+
+      if (response.success && response.data) {
+        const updatedSession = response.data;
+        set(state => ({ 
+          sessions: state.sessions.map(s => s.id === sessionId ? updatedSession : s),
+          currentSession: state.currentSession?.id === sessionId ? updatedSession : state.currentSession,
+        }));
+        return updatedSession;
+      } else {
+        // 回滚
+        // 实际上这里需要重新 fetch 比较好，简化起见这里先抛出错误
+        throw new Error(response.error || 'Failed to update session');
+      }
+    } catch (error) {
+      console.error('Update session error:', error);
+      // 可以在这里回滚状态或者显示错误提示
+      return null;
+    }
+  },
+
   fetchMessages: async (sessionId: string) => {
+    // 检查缓存
+    const state = get();
+    if (state.messageCache[sessionId]) {
+      set({ 
+        messages: state.messageCache[sessionId], 
+        error: null 
+      });
+      // 即使有缓存，也可以在后台静默刷新，或者直接返回
+      // 这里选择直接返回，除非需要实时同步
+      return; 
+    }
+
     set({ isLoading: true, error: null });
     
     try {
@@ -116,11 +170,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
 
       if (response.success && response.data) {
-        set({ 
-          messages: response.data, 
+        set(state => ({ 
+          messages: response.data,
+          messageCache: { ...state.messageCache, [sessionId]: response.data }, // 更新缓存
           isLoading: false,
           error: null
-        });
+        }));
       } else {
         throw new Error(response.error || 'Failed to fetch messages');
       }
@@ -134,7 +189,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => {
-    set({ isStreaming: true, error: null });
+    set({ isStreaming: true, streamingSessionId: sessionId, error: null });
     
     try {
       // 立即添加用户消息到本地状态
@@ -147,9 +202,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         created_at: new Date().toISOString()
       };
       
-      set(state => ({
-        messages: [...state.messages, userMessage]
-      }));
+      set(state => {
+        const newMessages = [...state.messages, userMessage];
+        return {
+          messages: newMessages,
+          messageCache: { ...state.messageCache, [sessionId]: newMessages }
+        };
+      });
 
       let aiResponse = '';
       
@@ -167,9 +226,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         (error) => {
           console.error('Stream error:', error);
-          set({ error: error.message, isStreaming: false });
+          
+          // 如果当前流式会话ID不匹配（例如切换了Agent），不做任何操作
+          if (get().streamingSessionId !== sessionId) return;
+
+          // 如果已经切换了会话（同一个Agent内），停止流式状态但不显示错误
+          if (get().currentSession?.id !== sessionId) {
+            set({ isStreaming: false, streamingSessionId: null });
+            return;
+          }
+          set({ error: error.message, isStreaming: false, streamingSessionId: null });
         },
         () => {
+          // 如果当前流式会话ID不匹配（例如切换了Agent），不做任何操作
+          if (get().streamingSessionId !== sessionId) return;
+
+          // 如果已经切换了会话（同一个Agent内），停止流式状态但不更新消息
+          if (get().currentSession?.id !== sessionId) {
+            set({ isStreaming: false, streamingSessionId: null });
+            return;
+          }
+
           // 流式响应完成，添加AI回复到本地状态
           if (aiResponse.trim()) {
             const aiMessage: Message = {
@@ -181,12 +258,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
               created_at: new Date().toISOString()
             };
             
-            set(state => ({
-              messages: [...state.messages, aiMessage],
-              isStreaming: false
-            }));
+            set(state => {
+              const newMessages = [...state.messages, aiMessage];
+              return {
+                messages: newMessages,
+                messageCache: { ...state.messageCache, [sessionId]: newMessages },
+                isStreaming: false,
+                streamingSessionId: null
+              };
+            });
           } else {
-            set({ isStreaming: false });
+            set({ isStreaming: false, streamingSessionId: null });
           }
         }
       );
@@ -194,6 +276,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const errorMessage = error instanceof Error ? error.message : '发送消息失败';
       set({ 
         isStreaming: false, 
+        streamingSessionId: null,
         error: errorMessage 
       });
       throw error;
@@ -234,6 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearChat: () => {
+    // 仅清空当前会话引用和显示的消息，但不清空缓存
     set({ currentSession: null, messages: [] });
   },
 

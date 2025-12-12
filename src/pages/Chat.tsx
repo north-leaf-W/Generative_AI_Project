@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe } from 'lucide-react';
+import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
@@ -23,10 +23,12 @@ const Chat: React.FC = () => {
     messages, 
     isLoading, 
     isStreaming,
+    streamingSessionId,
     fetchSessions, 
     createSession, 
     fetchMessages, 
     sendMessage, 
+    updateSession,
     deleteSession, 
     setCurrentSession,
     clearChat,
@@ -42,6 +44,8 @@ const Chat: React.FC = () => {
   const [pendingNew, setPendingNew] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [localAgent, setLocalAgent] = useState<Agent | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editTitleInput, setEditTitleInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -76,7 +80,10 @@ const Chat: React.FC = () => {
 
     // 组件卸载或 agentId 变化时清理状态
     return () => {
-      reset();
+      // 不再重置整个 store，保留缓存
+      // reset(); 
+      // 仅清理当前聊天显示
+      clearChat();
     };
   }, [agentId, user, navigate, fetchSessions, clearChat, reset, mode]);
 
@@ -96,9 +103,10 @@ const Chat: React.FC = () => {
   useEffect(() => {
     if (currentSession && !pendingNew) {
       setMessagesLoading(true);
-      Promise.resolve(fetchMessages(currentSession.id)).finally(() => setMessagesLoading(false));
+      fetchMessages(currentSession.id)
+        .finally(() => setMessagesLoading(false));
     }
-  }, [currentSession?.id, fetchMessages]);
+  }, [currentSession?.id]); // 仅当 session ID 变化时触发
 
   const handleCreateSession = async () => {
     if (!agentId) return;
@@ -156,6 +164,28 @@ const Chat: React.FC = () => {
     if (deleteConfirmation) {
       await deleteSession(deleteConfirmation);
       setDeleteConfirmation(null);
+    }
+  };
+
+  const handleStartRename = (e: React.MouseEvent, session: Session) => {
+    e.stopPropagation();
+    setEditingSessionId(session.id);
+    setEditTitleInput(session.title);
+  };
+
+  const handleRenameSubmit = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (editingSessionId && editTitleInput.trim()) {
+      await updateSession(editingSessionId, { title: editTitleInput.trim() });
+      setEditingSessionId(null);
+    }
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleRenameSubmit();
+    } else if (e.key === 'Escape') {
+      setEditingSessionId(null);
     }
   };
 
@@ -219,9 +249,10 @@ const Chat: React.FC = () => {
       )}
       
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-80 md:w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'} transition-all duration-300 glass border-r border-white/20 flex flex-col overflow-hidden fixed md:relative h-full z-20 md:z-auto`}>
-        <div className="p-4 border-b border-gray-200/50">
-          <div className="flex items-center justify-between mb-4">
+      <div className={`${sidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'} transition-all duration-300 glass border-r border-white/20 flex flex-col overflow-hidden fixed md:relative h-full z-20 md:z-auto`}>
+        <div className={`w-80 flex flex-col h-full transition-opacity duration-300 ${sidebarOpen ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="p-4 border-b border-gray-200/50">
+            <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-800">
               对话历史
               {mode === 'dev' && <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">开发环境</span>}
@@ -279,29 +310,67 @@ const Chat: React.FC = () => {
                     }}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {session.title || '未命名对话'}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(session.created_at).toLocaleDateString('zh-CN')}
-                        </p>
+                      <div className="flex-1 min-w-0 mr-2">
+                        {editingSessionId === session.id ? (
+                          <div className="flex items-center space-x-1" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editTitleInput}
+                              onChange={(e) => setEditTitleInput(e.target.value)}
+                              onKeyDown={handleRenameKeyDown}
+                              className="w-full text-sm px-1 py-0.5 border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              autoFocus
+                              onBlur={() => handleRenameSubmit()}
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {session.title || '未命名对话'}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {new Date(session.created_at).toLocaleDateString('zh-CN')}
+                            </p>
+                          </>
+                        )}
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteSession(session.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {editingSessionId === session.id ? (
+                          <button
+                            onClick={handleRenameSubmit}
+                            className="p-1 text-green-600 hover:bg-green-100 rounded"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={(e) => handleStartRename(e, session)}
+                              className="p-1 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-all"
+                              title="重命名"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSession(session.id);
+                              }}
+                              className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-all"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 ))}
               </AnimatePresence>
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -336,14 +405,19 @@ const Chat: React.FC = () => {
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              {!sidebarOpen && (
+              <div 
+                className={`overflow-hidden transition-all duration-300 ease-in-out flex items-center ${
+                  !sidebarOpen ? 'w-9 opacity-100' : 'w-0 opacity-0'
+                }`}
+              >
                 <button
                   onClick={() => setSidebarOpen(true)}
-                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap"
+                  disabled={sidebarOpen}
                 >
                   <Menu className="w-5 h-5" />
                 </button>
-              )}
+              </div>
               <div className="flex items-center space-x-2 md:space-x-3">
                 <img
                   src={currentAgent.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentAgent.name)}&background=random`}
@@ -360,7 +434,6 @@ const Chat: React.FC = () => {
                           : 'bg-indigo-100 text-indigo-700 border-indigo-200'
                       }`}>
                         {currentAgent.status === 'private' ? '私有' : '我的'}
-                        {(currentAgent as any).draft_revision && ' (调试模式)'}
                       </span>
                     )}
                     <button
@@ -445,7 +518,7 @@ const Chat: React.FC = () => {
                   </div>
                 </div>
               ))}
-              {isStreaming && (
+              {isStreaming && currentSession?.id === streamingSessionId && (
                 <div className="flex justify-start">
                   <div className="flex items-start space-x-2 md:space-x-3 max-w-[80%] md:max-w-2xl">
                     <div className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0">

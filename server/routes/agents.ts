@@ -195,15 +195,20 @@ router.get('/my', authenticateToken, async (req, res) => {
       // 使用 supabaseAdmin 绕过 RLS，因为标准 supabase 客户端可能没有用户上下文
       const { data: revisions } = await supabaseAdmin
         .from('agent_revisions')
-        .select('agent_id')
+        .select('agent_id, status')
         .in('agent_id', agentIds)
-        .eq('status', 'pending');
+        .in('status', ['pending', 'rejected']);
         
       if (revisions && revisions.length > 0) {
-        const revisionMap = new Set(revisions.map(r => r.agent_id));
+        const pendingMap = new Set(revisions.filter(r => r.status === 'pending').map(r => r.agent_id));
+        const rejectedMap = new Set(revisions.filter(r => r.status === 'rejected').map(r => r.agent_id));
+
         (agents || []).forEach(agent => {
-          if (revisionMap.has(agent.id)) {
+          if (pendingMap.has(agent.id)) {
             (agent as any).has_pending_revision = true;
+          }
+          if (rejectedMap.has(agent.id)) {
+            (agent as any).has_rejected_revision = true;
           }
         });
       }
@@ -471,7 +476,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
         .from('agent_revisions')
         .select('*')
         .eq('agent_id', id)
-        .in('status', ['draft', 'pending'])
+        .in('status', ['draft', 'pending', 'rejected'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

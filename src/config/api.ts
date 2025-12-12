@@ -29,6 +29,7 @@ export const API_ENDPOINTS = {
     agent: (agentId: string) => `${API_BASE_URL}/sessions/agent/${agentId}`,
     detail: (id: string) => `${API_BASE_URL}/sessions/${id}`,
     messages: (id: string) => `${API_BASE_URL}/sessions/${id}/messages`,
+    update: (id: string) => `${API_BASE_URL}/sessions/${id}`,
     delete: (id: string) => `${API_BASE_URL}/sessions/${id}`,
   },
   chat: {

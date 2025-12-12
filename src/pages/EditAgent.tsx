@@ -78,7 +78,11 @@ const EditAgent: React.FC = () => {
           });
           
           if (draft) {
-             setSubmitError('注意：当前显示的是未发布的草稿内容');
+             if (draft.status === 'rejected') {
+               setSubmitError('注意：您提交的修改申请已被拒绝，请修改后重新提交');
+             } else {
+               setSubmitError('注意：当前显示的是未发布的草稿内容');
+             }
           }
         } else {
           setSubmitError('智能体不存在');

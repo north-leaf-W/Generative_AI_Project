@@ -249,9 +249,11 @@ const MyAgents: React.FC = () => {
                       >
                           {isPublic && hasPendingRevision 
                             ? '已发布，新版本审核中' 
-                            : isPublic 
-                              ? '已发布' 
-                              : (isPending ? '审核中' : (hasPendingRevision ? '修改审核中' : '已保存'))
+                            : isPublic && (agent as any).has_rejected_revision
+                              ? '已发布，修改被拒'
+                              : isPublic 
+                                ? '已发布' 
+                                : (isPending ? '审核中' : (hasPendingRevision ? '修改审核中' : '已保存'))
                           }
                       </span>
                     </div>
