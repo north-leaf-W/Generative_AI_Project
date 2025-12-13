@@ -3,6 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 // import pdf from 'pdf-parse'; // Avoid index.js side effects
 import pdf from 'pdf-parse/lib/pdf-parse.js';
+import mammoth from 'mammoth';
+import * as XLSX from 'xlsx';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -31,16 +33,65 @@ const embeddings = new AlibabaTongyiEmbeddings({
 
 const DOCS_DIR = path.resolve(__dirname, '../../documents/source');
 
-async function processPdf(filePath: string) {
+async function extractText(filePath: string): Promise<{ text: string; page_count?: number; info?: any }> {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext === '.pdf') {
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdf(dataBuffer);
+    return {
+      text: data.text,
+      page_count: data.numpages,
+      info: data.info
+    };
+  } else if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return {
+      text: result.value,
+      page_count: 1 // DOCX doesn't easily give page count without rendering
+    };
+  } else if (ext === '.doc') {
+    console.warn(`⚠️  Skipping .doc file (binary format not supported, please convert to .docx): ${path.basename(filePath)}`);
+    return { text: '' }; // TODO: Support legacy .doc if needed (requires external tools usually)
+  } else if (ext === '.xlsx' || ext === '.xls') {
+    const workbook = XLSX.readFile(filePath);
+    let text = '';
+    workbook.SheetNames.forEach(sheetName => {
+      const sheet = workbook.Sheets[sheetName];
+      text += `Sheet: ${sheetName}\n`;
+      text += XLSX.utils.sheet_to_txt(sheet);
+      text += '\n\n';
+    });
+    return {
+      text: text,
+      page_count: workbook.SheetNames.length
+    };
+  } else if (ext === '.md') {
+    const text = fs.readFileSync(filePath, 'utf-8');
+    return {
+      text: text,
+      page_count: 1
+    };
+  }
+  
+  return { text: '' };
+}
+
+async function processFile(filePath: string) {
   console.log(`📄 Processing file: ${filePath}`);
-  const dataBuffer = fs.readFileSync(filePath);
-  const data = await pdf(dataBuffer);
+  
+  const { text, page_count, info } = await extractText(filePath);
+
+  if (!text || text.trim().length === 0) {
+    console.warn(`⚠️  No text extracted from ${path.basename(filePath)}, skipping.`);
+    return;
+  }
   
   // Basic metadata
   const metadata = {
     source: path.basename(filePath),
-    page_count: data.numpages,
-    info: data.info,
+    page_count: page_count || 1,
+    info: info || {},
   };
 
   // Split text
@@ -74,7 +125,7 @@ async function processPdf(filePath: string) {
     keywords: [year, department].filter(Boolean).join(' ') 
   };
 
-  const docs = await splitter.createDocuments([data.text], [enrichedMetadata]);
+  const docs = await splitter.createDocuments([text], [enrichedMetadata]);
   console.log(`✂️  Split into ${docs.length} chunks (Size: 1000, Overlap: 200).`);
 
   // Generate embeddings and save to Supabase
@@ -98,41 +149,67 @@ async function processPdf(filePath: string) {
 }
 
 async function main() {
+  // Ensure docs dir exists
   if (!fs.existsSync(DOCS_DIR)) {
-    console.log(`Creating directory: ${DOCS_DIR}`);
-    fs.mkdirSync(DOCS_DIR, { recursive: true });
+    console.error(`❌ Documents directory not found: ${DOCS_DIR}`);
+    process.exit(1);
   }
 
-  const files = fs.readdirSync(DOCS_DIR).filter(file => file.endsWith('.pdf'));
+  const files = fs.readdirSync(DOCS_DIR).filter(file => {
+    const ext = path.extname(file).toLowerCase();
+    return ['.pdf', '.docx', '.xlsx', '.xls', '.md'].includes(ext);
+  });
 
-  if (files.length === 0) {
-    console.log('⚠️  No PDF files found in documents/source. Please add some files to ingest.');
-    return;
+  // Also scan crawled directory
+  const CRAWLED_DIR = path.join(DOCS_DIR, 'crawled');
+  if (fs.existsSync(CRAWLED_DIR)) {
+      const crawledFiles = fs.readdirSync(CRAWLED_DIR).filter(file => {
+          const ext = path.extname(file).toLowerCase();
+          return ['.md'].includes(ext);
+      });
+      console.log(`📂 Found ${crawledFiles.length} crawled documents in ${CRAWLED_DIR}`);
+      
+      // Process crawled files
+      for (const file of crawledFiles) {
+          const filePath = path.join(CRAWLED_DIR, file);
+           // Check if already processed (simple check based on source filename)
+           const { data: existingDocs } = await supabase
+             .from('documents')
+             .select('id')
+             .contains('metadata', { source: file })
+             .limit(1);
+      
+           if (existingDocs && existingDocs.length > 0) {
+             console.log(`⏭️  Skipping already processed file: ${file}`);
+             continue;
+           }
+      
+           await processFile(filePath);
+      }
   }
 
-  console.log(`🔍 Found ${files.length} PDF files.`);
+  console.log(`📂 Found ${files.length} documents in ${DOCS_DIR}`);
 
   for (const file of files) {
-    // Check if file already exists in database to avoid duplicates/re-embedding
-    const { count, error } = await supabase
-      .from('documents')
-      .select('id', { count: 'exact', head: true })
-      .filter('metadata->>source', 'eq', file);
+    const filePath = path.join(DOCS_DIR, file);
     
-    if (error) {
-      console.error(`❌ Error checking file status for ${file}:`, error);
+    // Check if already processed (simple check based on source filename)
+    // In a real app, you might want a hash check
+    const { data: existingDocs, error } = await supabase
+      .from('documents')
+      .select('id')
+      .contains('metadata', { source: file })
+      .limit(1);
+
+    if (existingDocs && existingDocs.length > 0) {
+      console.log(`⏭️  Skipping already processed file: ${file}`);
       continue;
     }
 
-    if (count && count > 0) {
-      console.log(`⏩ Skipping ${file} (already processed). Use --force to re-process.`);
-      continue;
-    }
-
-    await processPdf(path.join(DOCS_DIR, file));
+    await processFile(filePath);
   }
-
-  console.log('🎉 All files processed!');
+  
+  console.log('🎉 All documents processed!');
 }
 
 main().catch(console.error);
