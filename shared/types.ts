@@ -119,6 +119,7 @@ export interface ChatRequest {
   message: string;
   agentId: string;
   webSearch?: boolean;
+  enableRAG?: boolean;
 }
 
 export interface ChatResponse {

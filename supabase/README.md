@@ -4,7 +4,7 @@
 
 ## 1. 数据库概览
 
-本项目使用 PostgreSQL (Supabase) 作为主要数据库，启用了行级安全策略（RLS）以确保数据安全。
+本项目使用 PostgreSQL (Supabase) 作为主要数据库，启用了行级安全策略（RLS）以确保数据安全。此外，还启用了 `pgvector` 扩展以支持向量检索 (RAG)。
 
 ### 核心表结构
 
@@ -31,7 +31,7 @@
 - `creator_id`: UUID (FK -> users.id) - 创建者 ID
 - `status`: VARCHAR(20) - 发布状态，取值: `'private'` (私有), `'pending'` (审核中), `'public'` (已发布)
 - `category`: VARCHAR(50) - 分类 (Deprecated, use tags)
-- `tags`: TEXT[] - 标签数组 (目前前端强制单选，标准值: `'效率工具'`, `'文本创作'`, `'学习教育'`, `'代码助手'`, `'生活方式'`, `'游戏娱乐'`, `'角色扮演'`)
+- `tags`: TEXT[] - 标签数组 (目前前端强制单选，标准值: `'效率工具'`, `'文本创作'`, `'学习教育'`, `'代码助手'`, `'生活方式'`, `'游戏娱乐'`, `'角色扮演'`, `'高级智能体'`, `'RAG'`)
 - `created_at`: TIMESTAMPTZ
 
 #### `sessions` (会话表)
@@ -52,6 +52,13 @@
 - `role`: VARCHAR(20) - 消息角色，取值: `'user'`, `'assistant'`, `'system'`
 - `content`: TEXT - 消息内容
 - `created_at`: TIMESTAMPTZ
+
+#### `documents` (知识库文档表 - RAG)
+存储用于 RAG 检索的文档片段及向量。
+- `id`: UUID (PK)
+- `content`: TEXT - 文档片段内容
+- `metadata`: JSONB - 元数据 (包含 source, page, year, department 等)
+- `embedding`: VECTOR(1024) - 文本向量 (使用 text-embedding-v4 模型)
 
 #### `agent_revisions` (智能体修订表)
 存储已发布智能体的修改审核记录。
@@ -82,58 +89,67 @@
 
 ---
 
-## 2. 权限与安全 (RLS)
+## 2. 数据库函数 (RPC)
+
+#### `match_documents`
+基本的向量相似度检索函数。
+- **参数**: `query_embedding` (vector), `match_threshold` (float), `match_count` (int)
+- **功能**: 根据余弦距离返回最相似的文档片段。
+
+#### `hybrid_match_documents`
+**混合检索 (Hybrid Search)** 函数，结合向量检索与关键词全文检索。
+- **参数**: `query_embedding`, `match_threshold`, `match_count`, `query_text`, `full_text_weight`, `semantic_weight`
+- **功能**: 同时执行 Vector Search 和 PostgreSQL Full Text Search，合并结果并返回，有效提升专有名词和精确匹配的召回率。
+
+---
+
+## 3. 权限与安全 (RLS)
 
 所有表均已启用 RLS (Row Level Security)。
 
 ### 数据表访问策略
-*   **Users**:
-    *   用户只能查看和更新自己的资料。
-    *   管理员可以查看所有用户资料。
-*   **Agents**:
-    *   `public` 状态的智能体所有人可见。
-    *   用户可以查看、创建、更新、删除自己创建的智能体。
-    *   管理员可以查看、更新、删除所有智能体。
-*   **Sessions / Messages**:
-    *   用户只能访问（增删改查）属于自己的会话和消息。
-*   **Agent Revisions**:
-    *   用户只能查看和管理自己的修订版本。
-    *   管理员可以查看和审核所有待处理的修订版本。
-*   **Notifications**:
-    *   用户只能查看和更新（标记已读）自己的通知。
-*   **Favorites**:
-    *   用户只能管理自己的收藏列表。
+*   **Users**: 用户只能查看和更新自己的资料；管理员可查看所有。
+*   **Agents**: `public` 状态所有人可见；用户管理自己的；管理员管理所有。
+*   **Sessions / Messages**: 用户只能访问属于自己的会话和消息。
+*   **Documents**: 
+    *   `select`: 允许所有认证用户查询 (用于 RAG 检索)。
+    *   `insert/update/delete`: 仅允许 service_role (后端脚本) 操作。
+*   **Agent Revisions**: 用户管理自己的修订；管理员审核所有。
+*   **Notifications**: 用户管理自己的通知。
+*   **Favorites**: 用户管理自己的收藏。
 
 ### 存储桶访问策略 (Storage)
-Bucket: `agent-avatars`
-*   **Public Access**: 允许公开读取文件。
-*   **Upload (Insert)**: 仅允许认证用户上传，且文件大小限制为 1MB。
-*   **Update/Delete**: 仅允许认证用户修改/删除**自己上传的**文件 (路径匹配用户 ID)。
-
-Bucket: `user-avatars`
-*   **Public Access**: 允许公开读取文件。
-*   **Upload (Insert)**: 允许用户上传 (放宽限制以支持部分客户端场景)，且文件大小限制为 1MB。
-*   **Update/Delete**: 仅允许认证用户修改/删除**自己上传的**文件 (路径匹配用户 ID)。
+Bucket: `agent-avatars` / `user-avatars`
+*   **Public Access**: 允许公开读取。
+*   **Upload**: 允许认证用户上传 (1MB 限制)。
+*   **Update/Delete**: 仅允许用户操作自己上传的文件。
 
 ---
 
-## 3. 迁移历史 (Migrations)
+## 4. 迁移历史 (Migrations)
 
 数据库变更记录在 `supabase/migrations` 目录下：
 
-1.  `20251206_initial_schema.sql`: 初始化基础表结构 (`users`, `agents`, `sessions`, `messages`)。
-2.  `20251206_enable_rls.sql`: 为基础表启用 RLS 并配置基本策略。
-3.  `20251207_add_admin_role.sql`: 添加用户角色 (`admin`) 及相关 RLS 策略。
-4.  `20251207_add_admin_user.sql`: 创建初始管理员账号及种子数据。
-5.  `20251207_add_agent_creation.sql`: 完善智能体表 (`creator_id`, `status`) 及相关权限。
-6.  `20251207_add_notifications_and_revisions.sql`: 添加通知系统和审核修订表。
-7.  `20251207_add_session_mode.sql`: 为会话添加 `mode` 字段（调试/普通）。
-8.  `20251210_add_tags_and_favorites.sql`: 添加标签系统和收藏功能。
-9.  `20251210_update_agent_tags_v2.sql`: 标签数据清洗与迁移（标准化分类）。
-10. `20251210_fix_storage_rls_v5.sql`: 修复存储桶 RLS 策略，限制文件大小为 1MB，确保用户只能管理自己的文件。
-11. `20251211_add_user_avatars_storage.sql`: 新增用户头像存储桶 `user-avatars`，配置 RLS 策略（公开读，宽松上传，严格更新/删除）。
+1.  `20251206_initial_schema.sql`: 初始化基础表结构。
+2.  `20251206_enable_rls.sql`: 启用 RLS。
+3.  `20251207_add_admin_role.sql`: 添加管理员角色。
+4.  `20251207_add_admin_user.sql`: 初始管理员种子数据。
+5.  `20251207_add_agent_creation.sql`: 智能体创建相关字段。
+6.  `20251207_add_notifications_and_revisions.sql`: 通知与审核系统。
+7.  `20251207_add_session_mode.sql`: 会话模式。
+8.  `20251210_add_tags_and_favorites.sql`: 标签与收藏。
+9.  `20251210_update_agent_tags_v2.sql`: 标签数据清洗。
+10. `20251210_fix_storage_rls_v5.sql`: 存储桶 RLS 修复。
+11. `20251211_add_user_avatars_storage.sql`: 用户头像存储。
+12. `20251213_add_rag_knowledge_base.sql`: **RAG 基础建设** (启用 pgvector, 创建 documents 表, 添加 match_documents 函数)。
+13. `20251213_add_science_assistant_agent.sql`: **添加理工助手智能体** (种子数据)。
+14. `20251213_fix_embedding_dimensions.sql`: **修复向量维度** (1536 -> 1024, 适配 text-embedding-v4)。
+15. `20251213_add_hybrid_search.sql`: **添加混合检索** (hybrid_match_documents 函数)。
 
-## 4. 维护说明
+---
 
-*   **修改数据库**: 请务必通过新建 Migration SQL 文件进行，不要直接在生产环境执行 SQL，以保证环境一致性。
-*   **管理员权限**: 管理员权限通过 `users.role = 'admin'` 字段控制，配合 RLS 策略生效。
+## 5. 维护说明
+
+*   **修改数据库**: 请务必通过新建 Migration SQL 文件进行。
+*   **管理员权限**: 通过 `users.role = 'admin'` 字段控制。
+*   **RAG 向量检索**: 依赖 `pgvector` 扩展，请确保数据库支持该扩展。

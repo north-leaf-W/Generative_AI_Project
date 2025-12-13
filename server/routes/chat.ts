@@ -9,7 +9,7 @@ const router = express.Router();
 // 流式聊天接口
 router.post('/stream', authenticateToken, async (req, res) => {
   try {
-    const { sessionId, message, agentId, webSearch }: ChatRequest = req.body;
+    const { sessionId, message, agentId, webSearch, enableRAG: enableRAGParam }: ChatRequest = req.body;
     const userId = req.user!.id;
 
     // 验证输入
@@ -25,7 +25,7 @@ router.post('/stream', authenticateToken, async (req, res) => {
       .from('sessions')
       .select(`
         *,
-        agents!inner(id, name, system_prompt, creator_id)
+        agents!inner(id, name, system_prompt, creator_id, config)
       `)
       .eq('id', sessionId)
       .eq('user_id', userId)
@@ -94,7 +94,15 @@ router.post('/stream', authenticateToken, async (req, res) => {
     const messageHistory = (historyMessages || []).reverse();
 
     // 生成AI回复（流式），并在完成后保存
-    const aiResponse = await generateAIResponse(message, systemPrompt, messageHistory, res, webSearch);
+    // 检查是否是"理工助手" (假设前端会传某种标记，或者根据 ID 判断)
+    // 优先使用请求参数中的 enableRAG，如果没有则回退到 agent 配置
+    const configEnableRAG = session.agents.config && (session.agents.config as any).rag_enabled;
+    const enableRAG = enableRAGParam !== undefined ? enableRAGParam : configEnableRAG;
+
+    console.log(`[Chat] Session: ${sessionId}, Agent: ${agentId}`);
+    console.log(`[Chat] RAG Status - Param: ${enableRAGParam}, Config: ${configEnableRAG}, Final: ${enableRAG}`);
+
+    const aiResponse = await generateAIResponse(message, systemPrompt, messageHistory, res, webSearch, enableRAG);
 
     try {
       if (aiResponse && aiResponse.trim()) {

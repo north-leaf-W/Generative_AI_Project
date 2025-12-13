@@ -17,7 +17,7 @@ interface ChatState {
   createSession: (agentId: string, title?: string, mode?: 'public' | 'dev') => Promise<Session | null>;
   updateSession: (sessionId: string, updates: Partial<Session>) => Promise<Session | null>;
   fetchMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => Promise<void>;
+  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   setCurrentSession: (session: Session | null) => void;
   clearChat: () => void;
@@ -188,7 +188,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean) => {
+  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean) => {
     set({ isStreaming: true, streamingSessionId: sessionId, error: null });
     
     try {
@@ -214,7 +214,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       await streamRequest(
         API_ENDPOINTS.chat.stream,
-        { sessionId, message, agentId, webSearch },
+        { sessionId, message, agentId, webSearch, enableRAG },
         (data) => {
           if (data.error) {
             throw new Error(data.error);

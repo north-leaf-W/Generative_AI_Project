@@ -29,3 +29,7 @@ coverage/
 
 # Supabase local
 supabase/.temp/
+
+# RAG Documents
+documents/source/*
+!documents/source/.gitkeep

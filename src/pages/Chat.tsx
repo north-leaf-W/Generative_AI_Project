@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check } from 'lucide-react';
+import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check, Database } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
@@ -37,6 +37,8 @@ const Chat: React.FC = () => {
 
   const [inputMessage, setInputMessage] = useState('');
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+  const [isRAGEnabled, setIsRAGEnabled] = useState(false);
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [agentLoading, setAgentLoading] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -46,10 +48,18 @@ const Chat: React.FC = () => {
   const [localAgent, setLocalAgent] = useState<Agent | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitleInput, setEditTitleInput] = useState('');
+  const [streamingContent, setStreamingContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const currentAgent = localAgent || agents.find(agent => agent.id === agentId) || myAgents.find(agent => agent.id === agentId);
+
+  // 当切换智能体时，根据智能体配置初始化 RAG 开关状态
+  useEffect(() => {
+    if (currentAgent) {
+      setIsRAGEnabled(!!currentAgent.config?.rag_enabled);
+    }
+  }, [currentAgent?.id, currentAgent?.config?.rag_enabled]);
 
   // 自动滚动到底部
   const scrollToBottom = () => {
@@ -58,7 +68,7 @@ const Chat: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingContent]);
 
   // 初始化聊天数据
   useEffect(() => {
@@ -99,6 +109,15 @@ const Chat: React.FC = () => {
     }
   }, [agentId, currentAgent, fetchAgent, agentLoading]);
 
+  // 根据智能体配置初始化 RAG 状态
+  useEffect(() => {
+    if (currentAgent?.config?.rag_enabled) {
+      setIsRAGEnabled(true);
+    } else {
+      setIsRAGEnabled(false);
+    }
+  }, [currentAgent]);
+
   // 监听当前会话变化加载消息（不自动选择最新会话）
   useEffect(() => {
     if (currentSession && !pendingNew) {
@@ -137,9 +156,18 @@ const Chat: React.FC = () => {
 
     const message = inputMessage.trim();
     setInputMessage('');
+    setStreamingContent('');
 
     try {
-      await sendMessage(targetSessionId, message, agentId, () => {}, isWebSearchEnabled);
+      await sendMessage(
+        targetSessionId, 
+        message, 
+        agentId, 
+        (token) => setStreamingContent(prev => prev + token), 
+        isWebSearchEnabled, 
+        isRAGEnabled
+      );
+      setStreamingContent(''); // 结束后清空，因为消息已存入 messages
     } catch (error) {
       console.error('Failed to send message:', error);
       // 如果出错，把消息放回输入框，方便用户重试
@@ -529,12 +557,19 @@ const Chat: React.FC = () => {
                       />
                     </div>
                     <div className="flex-1">
-                      <div className="inline-block px-3 py-2 md:px-4 md:py-2 rounded-2xl bg-gray-100">
-                        <div className="flex space-x-1">
-                          <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                          <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                          <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                        </div>
+                      <div className="inline-block px-4 py-3 rounded-2xl bg-white text-gray-800 rounded-bl-none border border-gray-100 shadow-sm">
+                        {streamingContent ? (
+                          <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">
+                            {streamingContent}
+                            <span className="inline-block w-1.5 h-4 ml-1 bg-blue-500 animate-pulse align-middle"></span>
+                          </p>
+                        ) : (
+                          <div className="flex space-x-1 py-1">
+                            <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                            <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -554,6 +589,19 @@ const Chat: React.FC = () => {
             </div>
 
             <div className="bg-white rounded-[2rem] shadow-xl border border-white/50 p-2 flex items-end space-x-2 transition-all hover:shadow-2xl relative z-20">
+              {currentAgent?.config?.rag_enabled && (
+                <button
+                  onClick={() => setIsRAGEnabled(!isRAGEnabled)}
+                  className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
+                    isRAGEnabled 
+                      ? 'bg-purple-100 text-purple-600 hover:bg-purple-200' 
+                      : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title={isRAGEnabled ? "关闭知识库检索" : "开启知识库检索"}
+                >
+                  <Database className="w-5 h-5" />
+                </button>
+              )}
               <button
                 onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
                 className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
