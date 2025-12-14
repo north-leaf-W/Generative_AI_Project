@@ -65,6 +65,9 @@ router.get('/', optionalAuth, async (req, res) => {
     // 无论如何，先从数据库按时间排序获取数据，保证基准稳定性
     query = query.order('created_at', { ascending: sortOrder === 'asc' });
       
+    // 强制过滤只显示公开的智能体
+    query = query.eq('status', 'public');
+
     const { data: publicAgents, error: publicError } = await query;
       
     if (publicError) throw publicError;
