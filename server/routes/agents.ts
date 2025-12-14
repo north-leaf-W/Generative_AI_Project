@@ -34,24 +34,34 @@ router.get('/', optionalAuth, async (req, res) => {
     }
 
     // 构建查询
+    // 方案优化：使用数据库视图 `public_agents_with_counts` 直接获取包含收藏数的智能体列表
+    // 这样可以利用数据库的高效聚合能力，避免在后端进行大量数据的内存计算
     let query = supabase
-      .from('agents')
-      .select('*')
-      .eq('is_active', true)
-      .eq('status', 'public');
+      .from('public_agents_with_counts')
+      .select('*');
       
     if (req.query.tag) {
       // tags 是数组，使用 contains
       query = query.contains('tags', [req.query.tag]);
     }
 
+    // 按创建时间排序（默认）
     query = query.order('created_at', { ascending: true });
       
     const { data: publicAgents, error: publicError } = await query;
       
     if (publicError) throw publicError;
     
-    let allAgents: Agent[] = publicAgents || [];
+    // 视图已经包含了 favorites_count 字段，直接使用
+    let allAgents: Agent[] = (publicAgents || []).map((agent: any) => ({
+      ...agent,
+      favorites_count: agent.favorites_count || 0
+    }));
+
+    // 如果需要按热度排序
+    if (req.query.sort === 'hot') {
+        allAgents.sort((a: any, b: any) => (b.favorites_count || 0) - (a.favorites_count || 0));
+    }
     
     // 填充作者信息
     if (allAgents.length > 0) {

@@ -138,7 +138,10 @@ const Chat: React.FC = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !agentId || isStreaming) return;
+    if (!inputMessage.trim() || !agentId) return;
+    
+    // 仅当正在流式传输且是当前会话时才阻止发送
+    if (isStreaming && currentSession?.id === streamingSessionId) return;
 
     let targetSessionId = currentSession?.id;
 
@@ -163,17 +166,41 @@ const Chat: React.FC = () => {
         targetSessionId, 
         message, 
         agentId, 
-        (token) => setStreamingContent(prev => prev + token), 
+        (token) => {
+          // 仅当此 token 属于当前正在流式传输的会话时才更新 UI
+          // 这防止了切换会话后，旧会话的流继续污染新会话的显示
+          if (useChatStore.getState().streamingSessionId === targetSessionId) {
+            setStreamingContent(prev => prev + token);
+          }
+        }, 
         isWebSearchEnabled, 
         isRAGEnabled
       );
-      setStreamingContent(''); // 结束后清空，因为消息已存入 messages
+      
+      // 仅当此会话结束流式传输时才清空（避免清空了新会话的内容）
+      if (useChatStore.getState().streamingSessionId === targetSessionId) {
+         setStreamingContent(''); 
+      }
+      
+      // 发送消息完成后，重新获取一次会话列表，以确保标题更新（如果是第一次对话）
+      // 延迟一点时间，给后端生成标题留出余地
+      if (targetSessionId === currentSession?.id && messages.length === 0) {
+        setTimeout(() => {
+          fetchSessions(agentId, mode);
+        }, 2000);
+      } else if (targetSessionId && messages.length === 0) {
+         // 新建会话的情况
+         setTimeout(() => {
+          fetchSessions(agentId, mode);
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
-      // 如果出错，把消息放回输入框，方便用户重试
-      setInputMessage(message);
-      // 这里可以添加一个简单的 alert 或者 toast 提示
-      alert('发送消息失败，请检查网络或后端服务是否正常。');
+      // 如果出错，且是当前会话，把消息放回输入框，方便用户重试
+      if (currentSession?.id === targetSessionId) {
+        setInputMessage(message);
+        alert('发送消息失败，请检查网络或后端服务是否正常。');
+      }
     }
   };
 
@@ -620,17 +647,17 @@ const Chat: React.FC = () => {
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="和 Agent 一起开始你的工作..."
-                  disabled={isStreaming}
+                  disabled={isStreaming && currentSession?.id === streamingSessionId}
                   className="w-full px-4 py-3 bg-transparent border-none focus:ring-0 resize-none text-gray-800 placeholder-gray-400 text-base min-h-[56px] max-h-[200px]"
                   rows={1}
                 />
               </div>
               <button
                 onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || isStreaming}
+                disabled={!inputMessage.trim() || (isStreaming && currentSession?.id === streamingSessionId)}
                 className="p-3 bg-gray-900 text-white rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex-shrink-0 mb-1 mr-1"
               >
-                {isStreaming ? (
+                {isStreaming && currentSession?.id === streamingSessionId ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <Send className="w-5 h-5" />

@@ -42,7 +42,7 @@ const Home: React.FC = () => {
   }, [checkAuth]);
 
   useEffect(() => {
-    fetchAgents();
+    fetchAgents('全部', 'hot'); // 获取热门智能体
   }, [fetchAgents]);
 
   useEffect(() => {

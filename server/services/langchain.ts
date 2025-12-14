@@ -70,9 +70,9 @@ export const createStreamHandler = (res: Response, append: (t: string) => void, 
 };
 
 // RAG: 检索相关文档 (优化版：混合检索 + 重排序)
-export const retrieveDocuments = async (query: string, limit: number = 5, threshold: number = 0.5) => {
+export const retrieveDocuments = async (query: string, limit: number = 5, threshold: number = 0.2) => {
   try {
-    console.log(`[RAG] Starting retrieval for query: "${query}"`);
+    console.log(`[RAG] Starting retrieval for query: "${query}" (Threshold: ${threshold})`);
     
     // Step 1: Generate Embedding
     const queryEmbedding = await embeddings.embedQuery(query);
@@ -83,38 +83,46 @@ export const retrieveDocuments = async (query: string, limit: number = 5, thresh
     // 或者尝试简单的 N-gram 模拟：这里先直接传 query，依靠 postgres simple config 的默认行为
     const queryText = query; 
 
-    // 扩大召回数量供 Rerank 使用 (例如取 4 倍的 limit)
-    const initialLimit = limit * 4;
+    // 扩大召回数量供 Rerank 使用
+    // 由于重排模型效果好，我们可以在召回阶段尽可能多地召回文档，即使阈值较低
+    const initialLimit = limit * 6;
 
-    const { data: documents, error } = await supabase.rpc('hybrid_match_documents', {
+    let documents: any[] = [];
+    let searchMethod = 'hybrid';
+
+    const { data: hybridDocs, error } = await supabase.rpc('hybrid_match_documents', {
       query_embedding: queryEmbedding,
-      match_threshold: threshold, // 向量检索的阈值
+      match_threshold: threshold,
       match_count: initialLimit,
       query_text: queryText
     });
 
     if (error) {
       console.error('[RAG] Error searching documents (RPC):', error);
-      // Fallback: 尝试旧的纯向量检索函数，以防 migration 未生效
       console.log('[RAG] Falling back to standard match_documents');
+      searchMethod = 'vector_only';
+      
       const { data: fallbackDocs, error: fallbackError } = await supabase.rpc('match_documents', {
         query_embedding: queryEmbedding,
         match_threshold: threshold,
-        match_count: limit
+        match_count: initialLimit // 这里也应该扩大召回，供 Rerank 使用
       });
+      
       if (fallbackError) {
         console.error('[RAG] Fallback failed:', fallbackError);
         return [];
       }
-      return fallbackDocs || [];
+      documents = fallbackDocs || [];
+    } else {
+      documents = hybridDocs || [];
     }
 
     if (!documents || documents.length === 0) {
-      console.log('[RAG] No documents found in initial search.');
+      console.log(`[RAG] No documents found (${searchMethod}).`);
       return [];
     }
 
-    console.log(`[RAG] Initial recall: ${documents.length} documents.`);
+    console.log(`[RAG] Initial recall (${searchMethod}): ${documents.length} documents.`);
 
     // Step 3: Rerank (重排序)
     // 提取文档内容列表

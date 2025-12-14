@@ -145,6 +145,8 @@ Bucket: `agent-avatars` / `user-avatars`
 13. `20251213_add_science_assistant_agent.sql`: **添加理工助手智能体** (种子数据)。
 14. `20251213_fix_embedding_dimensions.sql`: **修复向量维度** (1536 -> 1024, 适配 text-embedding-v4)。
 15. `20251213_add_hybrid_search.sql`: **添加混合检索** (hybrid_match_documents 函数)。
+16. `20251214_add_favorites_count_view.sql`: **添加收藏数统计视图** (创建 public_agents_with_counts 视图，优化热门智能体查询性能)。
+17. `20251214_fix_hybrid_search_rpc.sql`: **修复混合检索 RPC** (修正参数类型匹配问题)。
 
 ---
 

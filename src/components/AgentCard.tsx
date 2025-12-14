@@ -18,6 +18,8 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
     toggleFavorite(agent);
   };
 
+  // console.log('Agent:', agent.name, 'Favorites:', agent.favorites_count); // Debug
+
   return (
     <motion.div
       whileHover={{ y: -2 }}
@@ -72,16 +74,23 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               </div>
             </div>
             {/* 收藏按钮 */}
-            <button
-              onClick={handleFavorite}
-              className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-            >
-              <Star
-                className={`w-5 h-5 transition-colors ${
-                  agent.is_favorited ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
-                }`}
-              />
-            </button>
+            <div className="flex flex-col items-center min-w-[32px]">
+              <button
+                onClick={handleFavorite}
+                className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+              >
+                <Star
+                  className={`w-5 h-5 transition-colors ${
+                    agent.is_favorited ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
+                  }`}
+                />
+              </button>
+              {typeof agent.favorites_count === 'number' && agent.favorites_count >= 0 && (
+                <span className="text-[10px] text-gray-400 font-medium -mt-1">
+                  {agent.favorites_count}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* 描述 */}

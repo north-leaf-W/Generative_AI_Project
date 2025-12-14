@@ -29,6 +29,7 @@ export interface Agent {
   };
   has_pending_revision?: boolean; // 前端辅助字段，表示是否有待审核的修改
   is_favorited?: boolean; // 前端辅助字段，表示是否已收藏
+  favorites_count?: number; // 前端辅助字段，表示收藏数
 }
 
 // 智能体修订版本

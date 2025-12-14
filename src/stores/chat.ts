@@ -96,6 +96,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set(state => ({ 
           sessions: [newSession, ...state.sessions],
           currentSession: newSession,
+          messages: [], // 确保创建新会话时清空消息列表，防止旧消息残留
           isLoading: false,
           error: null
         }));
@@ -189,6 +190,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean) => {
+    // 即使切换了会话，我们也允许后台继续接收数据，但不更新 UI 的 streamingSessionId
     set({ isStreaming: true, streamingSessionId: sessionId, error: null });
     
     try {
@@ -203,11 +205,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
       
       set(state => {
-        const newMessages = [...state.messages, userMessage];
-        return {
-          messages: newMessages,
-          messageCache: { ...state.messageCache, [sessionId]: newMessages }
-        };
+        // 安全检查：确保我们是在正确的消息列表上追加
+        // 只有当 messages 不为空，且其 sessionId 与当前发送消息的 sessionId 一致时，才使用 messages 作为基准
+        // 否则（比如刚刚新建会话，但 fetchMessages 还没回来，或者残留了旧消息），应该从缓存或者空数组开始
+        let baseMessages: Message[] = [];
+        
+        if (state.messages.length > 0 && state.messages[0].session_id === sessionId) {
+            baseMessages = state.messages;
+        } else if (state.messageCache[sessionId]) {
+            baseMessages = state.messageCache[sessionId];
+        }
+
+        const newMessages = [...baseMessages, userMessage];
+        // 即使切换了会话，也要更新对应会话的缓存，这样切回来时能看到
+        const updatedCache = { ...state.messageCache };
+        // 如果缓存中已有该会话消息，追加；如果没有，初始化
+        if (updatedCache[sessionId]) {
+            // 检查最后一条消息是否已经存在（防止重复添加）
+            const lastMsg = updatedCache[sessionId][updatedCache[sessionId].length - 1];
+            if (lastMsg?.id !== userMessage.id) {
+                 updatedCache[sessionId] = [...updatedCache[sessionId], userMessage];
+            }
+        } else {
+            updatedCache[sessionId] = [userMessage];
+        }
+
+        // 仅当当前显示的会话是发送消息的会话时，才更新 messages
+        if (state.currentSession?.id === sessionId) {
+            return {
+                messages: newMessages,
+                messageCache: updatedCache
+            };
+        } else {
+            return {
+                messageCache: updatedCache
+            };
+        }
       });
 
       let aiResponse = '';
@@ -227,26 +260,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (error) => {
           console.error('Stream error:', error);
           
-          // 如果当前流式会话ID不匹配（例如切换了Agent），不做任何操作
-          if (get().streamingSessionId !== sessionId) return;
-
-          // 如果已经切换了会话（同一个Agent内），停止流式状态但不显示错误
-          if (get().currentSession?.id !== sessionId) {
-            set({ isStreaming: false, streamingSessionId: null });
-            return;
+          // 如果当前流式会话ID匹配，才更新 store 的 error 状态
+          if (get().streamingSessionId === sessionId) {
+             set({ error: error.message, isStreaming: false, streamingSessionId: null });
           }
-          set({ error: error.message, isStreaming: false, streamingSessionId: null });
         },
         () => {
-          // 如果当前流式会话ID不匹配（例如切换了Agent），不做任何操作
-          if (get().streamingSessionId !== sessionId) return;
-
-          // 如果已经切换了会话（同一个Agent内），停止流式状态但不更新消息
-          if (get().currentSession?.id !== sessionId) {
-            set({ isStreaming: false, streamingSessionId: null });
-            return;
-          }
-
           // 流式响应完成，添加AI回复到本地状态
           if (aiResponse.trim()) {
             const aiMessage: Message = {
@@ -259,26 +278,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
             
             set(state => {
-              const newMessages = [...state.messages, aiMessage];
-              return {
-                messages: newMessages,
-                messageCache: { ...state.messageCache, [sessionId]: newMessages },
-                isStreaming: false,
-                streamingSessionId: null
-              };
+              // 更新缓存中的消息列表
+              const updatedCache = { ...state.messageCache };
+              const sessionMessages = updatedCache[sessionId] || [];
+              
+              // 检查是否已经添加过该消息（通过 ID 或内容判断，防止重复）
+              const lastMsg = sessionMessages[sessionMessages.length - 1];
+              if (lastMsg?.role !== 'assistant' || lastMsg?.content !== aiMessage.content) {
+                  updatedCache[sessionId] = [...sessionMessages, aiMessage];
+              }
+
+              // 如果当前显示的正是该会话，则同时更新 messages 状态
+              if (state.currentSession?.id === sessionId) {
+                  return {
+                    messages: updatedCache[sessionId], // 使用缓存中的完整列表
+                    messageCache: updatedCache,
+                    isStreaming: false,
+                    streamingSessionId: null
+                  };
+              } else {
+                  // 如果已经切换走了，只更新缓存，不更新 messages
+                  // 并且如果当前 store 认为正在流式传输的还是这个 session，则清除流式状态
+                  if (state.streamingSessionId === sessionId) {
+                      return {
+                          messageCache: updatedCache,
+                          isStreaming: false,
+                          streamingSessionId: null
+                      };
+                  } else {
+                      return {
+                          messageCache: updatedCache
+                      };
+                  }
+              }
             });
           } else {
-            set({ isStreaming: false, streamingSessionId: null });
+            // 如果响应为空，仅在需要时清除流式状态
+            if (get().streamingSessionId === sessionId) {
+                set({ isStreaming: false, streamingSessionId: null });
+            }
           }
         }
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '发送消息失败';
-      set({ 
-        isStreaming: false, 
-        streamingSessionId: null,
-        error: errorMessage 
-      });
+      if (get().streamingSessionId === sessionId) {
+          set({ 
+            isStreaming: false, 
+            streamingSessionId: null,
+            error: errorMessage 
+          });
+      }
       throw error;
     }
   },

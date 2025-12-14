@@ -13,6 +13,11 @@ export class AlibabaTongyiRerank {
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey || process.env.DASHSCOPE_API_KEY || "";
+    // 如果环境变量指定了 Rerank 模型，则使用之，否则默认 gte-rerank
+    // 注意：gte-rerank 是 v1，gte-rerank-v2 效果可能更好但可能需要确认权限
+    if (process.env.DASHSCOPE_RERANK_MODEL) {
+      this.modelName = process.env.DASHSCOPE_RERANK_MODEL;
+    }
     if (!this.apiKey) {
       throw new Error("Aliyun DashScope API key not found");
     }

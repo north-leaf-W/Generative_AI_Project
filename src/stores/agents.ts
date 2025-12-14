@@ -10,7 +10,7 @@ interface AgentsState {
   error: string | null;
   
   // Actions
-  fetchAgents: (tag?: string) => Promise<void>;
+  fetchAgents: (tag?: string, sort?: 'hot' | 'new') => Promise<void>;
   fetchMyAgents: () => Promise<void>;
   fetchFavorites: () => Promise<void>;
   toggleFavorite: (agent: Agent) => Promise<boolean>;
@@ -32,13 +32,23 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   isLoading: true, // 初始为加载中
   error: null,
 
-  fetchAgents: async (tag?: string) => {
+  fetchAgents: async (tag?: string, sort?: 'hot' | 'new') => {
     set({ isLoading: true, error: null });
     
     try {
       let url = API_ENDPOINTS.agents.list;
+      const params = new URLSearchParams();
+      
       if (tag && tag !== '全部') {
-        url += `?tag=${encodeURIComponent(tag)}`;
+        params.append('tag', tag);
+      }
+      
+      if (sort) {
+        params.append('sort', sort);
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
       }
 
       const response = await apiRequest<ApiResponse<Agent[]>>(url, {
@@ -46,6 +56,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       });
 
       if (response.success && response.data) {
+        // console.log('Fetched agents:', response.data); // Debug: Check if favorites_count is present
         set({ 
           agents: response.data, 
           isLoading: false,
