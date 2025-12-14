@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "@/pages/Home";
 import AgentSquare from "@/pages/AgentSquare";
@@ -14,8 +15,17 @@ import MyAgents from "./pages/MyAgents";
 import AdminAgents from "./pages/AdminAgents";
 import Layout from "@/components/Layout/Layout";
 import VerifyEmail from "./pages/VerifyEmail";
+import { useAuthStore } from "./stores/auth";
 
 export default function App() {
+  const { checkAuth, token } = useAuthStore();
+
+  useEffect(() => {
+    // 仅在有 token 但没有 user 信息，或者页面初始化时进行一次检查
+    // 避免频繁调用
+    checkAuth();
+  }, []); // 仅在组件挂载时执行一次
+
   return (
     <Router>
       <Routes>

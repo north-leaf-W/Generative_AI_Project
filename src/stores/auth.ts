@@ -178,12 +178,22 @@ export const useAuthStore = create<AuthState>()(
         const token = get().token || localStorage.getItem('token');
         
         if (!token) {
+          // 确保状态被清除
+          set({ user: null, token: null });
           return;
         }
+        
+        // 如果已经有用户信息且 token 没变，可以跳过检查（可选优化，取决于业务对实时性的要求）
+        // 这里为了安全起见，我们还是验证一下，但可以加个防抖或状态标记
 
         set({ isLoading: true });
         
         try {
+          // 先尝试恢复 token 到 state（如果只在 localStorage 里有）
+          if (token && !get().token) {
+             set({ token });
+          }
+
           const response = await apiRequest<{ data: User }>(API_ENDPOINTS.auth.me, {
             method: 'GET',
           });
@@ -195,13 +205,24 @@ export const useAuthStore = create<AuthState>()(
           });
           
         } catch (error) {
-          // Token无效或过期
-          localStorage.removeItem('token');
-          set({ 
-            user: null, 
-            token: null, 
-            isLoading: false 
-          });
+          console.error('Auth check failed:', error);
+          
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          // 只有在明确的认证错误（401/403）时才清除 Token
+          // 避免因为网络波动（Failed to fetch, ERR_ABORTED）导致用户意外登出
+          if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('Unauthorized')) {
+            localStorage.removeItem('token');
+            set({ 
+              user: null, 
+              token: null, 
+              isLoading: false 
+            });
+          } else {
+            // 网络错误或其他错误，保留 Token 和当前 User 状态（如果有）
+            // 仅重置 isLoading
+            set({ isLoading: false });
+          }
         }
       },
 

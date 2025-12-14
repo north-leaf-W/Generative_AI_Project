@@ -4,13 +4,17 @@ import { API_ENDPOINTS, apiRequest } from '../config/api';
 
 interface AgentsState {
   agents: Agent[];
+  homeAgents: Agent[]; // 新增：首页专用数据缓存
   myAgents: Agent[];
   myFavorites: Agent[];
   isLoading: boolean;
   error: string | null;
+  currentTag?: string;
+  currentSort?: 'hot' | 'new' | 'hot_asc' | 'new_asc';
   
   // Actions
   fetchAgents: (tag?: string, sort?: 'hot' | 'new' | 'hot_asc' | 'new_asc') => Promise<void>;
+  fetchHomeAgents: () => Promise<void>; // 新增：获取首页数据
   fetchMyAgents: () => Promise<void>;
   fetchFavorites: () => Promise<void>;
   toggleFavorite: (agent: Agent) => Promise<boolean>;
@@ -26,14 +30,62 @@ interface AgentsState {
 
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   agents: [],
+  homeAgents: [], // 初始化
   myAgents: [],
   myFavorites: [],
   pendingAgents: [], // 新增
   isLoading: true, // 初始为加载中
   error: null,
+  currentTag: undefined,
+  currentSort: undefined,
+
+  fetchHomeAgents: async () => {
+    // 如果已经有首页数据，就不设置 isLoading 为 true，实现静默更新
+    // 但如果没有任何数据，还是需要 isLoading
+    if (get().homeAgents.length === 0) {
+      set({ isLoading: true, error: null });
+    } else {
+      set({ error: null }); // 清除可能存在的错误
+    }
+
+    try {
+      // 首页固定获取逻辑：全部标签，按热度排序
+      let url = API_ENDPOINTS.agents.list;
+      url += `?sort=hot`;
+
+      const response = await apiRequest<ApiResponse<Agent[]>>(url, {
+        method: 'GET',
+      });
+
+      if (response.success && response.data) {
+        set({ 
+          homeAgents: response.data, 
+          isLoading: false,
+          error: null
+        });
+      } else {
+        throw new Error(response.error || 'Failed to fetch home agents');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '获取首页智能体列表失败';
+      set({ 
+        isLoading: false, 
+        error: errorMessage 
+      });
+    }
+  },
 
   fetchAgents: async (tag?: string, sort?: 'hot' | 'new' | 'hot_asc' | 'new_asc') => {
-    set({ isLoading: true, error: null });
+    // 优化：如果参数一致且已有数据，则不显示 Loading（静默刷新）
+    const state = get();
+    const isSameParams = state.currentTag === tag && state.currentSort === sort;
+    const hasData = state.agents.length > 0;
+    
+    if (!isSameParams || !hasData) {
+      set({ isLoading: true, error: null });
+    } else {
+      set({ error: null });
+    }
     
     try {
       let url = API_ENDPOINTS.agents.list;
@@ -60,7 +112,9 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         set({ 
           agents: response.data, 
           isLoading: false,
-          error: null
+          error: null,
+          currentTag: tag,
+          currentSort: sort
         });
       } else {
         throw new Error(response.error || 'Failed to fetch agents');
@@ -130,14 +184,24 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     const method = isFav ? 'DELETE' : 'POST';
     
     // Optimistic update
-    const updateList = (list: Agent[]) => list.map(a => a.id === agent.id ? { ...a, is_favorited: !isFav } : a);
+    const updateList = (list: Agent[]) => list.map(a => {
+      if (a.id === agent.id) {
+        return {
+          ...a,
+          is_favorited: !isFav,
+          favorites_count: (a.favorites_count || 0) + (isFav ? -1 : 1)
+        };
+      }
+      return a;
+    });
     
     set(state => ({
       agents: updateList(state.agents),
+      homeAgents: updateList(state.homeAgents),
       myAgents: updateList(state.myAgents),
       myFavorites: isFav 
         ? state.myFavorites.filter(a => a.id !== agent.id) 
-        : [...state.myFavorites, { ...currentAgent, is_favorited: true }]
+        : [...state.myFavorites, { ...currentAgent, is_favorited: true, favorites_count: (currentAgent.favorites_count || 0) + 1 }]
     }));
 
     try {

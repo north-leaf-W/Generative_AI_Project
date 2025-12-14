@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNotificationsStore } from '../stores/notifications';
-import { Bell, RefreshCcw, CheckCheck, Trash2, CheckCircle } from 'lucide-react';
+import { Bell, RefreshCcw, CheckCheck, Trash2, CheckCircle, PartyPopper } from 'lucide-react';
 import Loading from '../components/Loading';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { useAuthStore } from '../stores/auth';
 import { useNavigate } from 'react-router-dom';
+import confetti from 'canvas-confetti';
 
 const Messages: React.FC = () => {
   const { user } = useAuthStore();
@@ -31,8 +32,49 @@ const Messages: React.FC = () => {
     }
   };
 
+  const triggerCelebration = () => {
+    const duration = 3 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    const random = (min: number, max: number) => {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval: any = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      // since particles fall down, start a bit higher than random
+      confetti({ ...defaults, particleCount, origin: { x: random(0.1, 0.3), y: Math.random() - 0.2 } });
+      confetti({ ...defaults, particleCount, origin: { x: random(0.7, 0.9), y: Math.random() - 0.2 } });
+    }, 250);
+  };
+
   const handleMarkAsRead = async (id: string) => {
+    // 检查是否是审核通过的消息
+    const notification = notifications.find(n => n.id === id);
+    if (notification && !notification.is_read && notification.type === 'audit_approved') {
+      triggerCelebration();
+    }
     await markAsRead(id);
+  };
+
+  const handleMarkAllAsRead = async () => {
+    // 检查是否有未读的审核通过消息
+    const hasUnreadApproved = notifications.some(n => 
+      !n.is_read && n.type === 'audit_approved'
+    );
+    
+    if (hasUnreadApproved) {
+      triggerCelebration();
+    }
+    
+    await markAllAsRead();
   };
 
   const handleDeleteClick = async (id: string) => {
@@ -78,7 +120,7 @@ const Messages: React.FC = () => {
             </button>
             <div className="w-px h-6 bg-gray-200" />
             <button
-              onClick={() => markAllAsRead()}
+              onClick={handleMarkAllAsRead}
               className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
             >
               <CheckCheck className="w-4 h-4" />
@@ -110,8 +152,11 @@ const Messages: React.FC = () => {
                         {!notification.is_read && (
                           <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
                         )}
-                        <h3 className={`text-base font-semibold ${notification.is_read ? 'text-gray-900' : 'text-blue-900'}`}>
+                        <h3 className={`text-base font-semibold ${notification.is_read ? 'text-gray-900' : 'text-blue-900'} flex items-center gap-2`}>
                           {notification.title}
+                          {notification.type === 'audit_approved' && (
+                            <PartyPopper className="w-4 h-4 text-yellow-500 animate-bounce" />
+                          )}
                         </h3>
                       </div>
                       <p className={`text-sm leading-relaxed ${notification.is_read ? 'text-gray-500' : 'text-gray-700'}`}>

@@ -21,13 +21,16 @@ const ADVANCED_AGENTS = [
 type SortOption = 'new' | 'new_asc' | 'hot' | 'hot_asc';
 
 const AgentSquare: React.FC = () => {
-  const { user, checkAuth } = useAuthStore();
-  const { agents, isLoading, error, fetchAgents, fetchFavorites } = useAgentsStore();
-  const [activeTag, setActiveTag] = React.useState('全部');
-  const [currentSort, setCurrentSort] = React.useState<SortOption>('new');
+  const { user } = useAuthStore();
+  const { agents, isLoading, error, fetchAgents, fetchFavorites, currentSort: storeSort, currentTag: storeTag } = useAgentsStore();
+  
+  // 初始化时优先使用 Store 中的状态，避免重复加载
+  const [activeTag, setActiveTag] = React.useState(storeTag || '全部');
+  const [currentSort, setCurrentSort] = React.useState<SortOption>(storeSort || 'new');
   const [isSortOpen, setIsSortOpen] = React.useState(false);
 
-  const tags = ['全部', '高级智能体', '效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'];
+  // 移除 '高级智能体' 标签
+  const tags = ['全部', '效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'];
 
   const sortOptions = [
     { value: 'new', label: '最新发布 (降序)' },
@@ -36,19 +39,19 @@ const AgentSquare: React.FC = () => {
     { value: 'hot_asc', label: '最受欢迎 (升序)' },
   ];
 
+  // 修改：仅在组件挂载或 store 中没有数据时加载一次，之后切换标签不再请求后端
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+    // 只有当 agents 为空时才去加载（或者你可以加一个强制刷新的按钮供用户手动刷新）
+    // 为了保证数据新鲜度，这里我们还是加载一次，但不依赖 activeTag 和 currentSort
+    // fetchAgents('全部', 'new'); // 移除这行，避免组件初始化时重复请求
+  }, []); // 依赖项移除 activeTag 和 currentSort，实现一次性加载
 
+  // 确保在组件挂载时检查一次数据，如果没有数据则加载
   useEffect(() => {
-    fetchAgents(activeTag, currentSort);
-  }, [fetchAgents, activeTag, currentSort]);
-
-  useEffect(() => {
-    if (user) {
-      fetchFavorites();
+    if (agents.length === 0) {
+        fetchAgents('全部', 'new');
     }
-  }, [user, fetchFavorites]);
+  }, [agents.length, fetchAgents]);
 
   const handleTagClick = (tag: string) => {
     setActiveTag(tag);
@@ -59,24 +62,40 @@ const AgentSquare: React.FC = () => {
     setIsSortOpen(false);
   };
 
+  // 前端筛选和排序逻辑
   const filteredAgents = React.useMemo(() => {
-    let allAgents = [...agents];
+    // 1. 筛选
+    let result = [...agents];
+    if (activeTag !== '全部') {
+      result = result.filter(agent => agent.tags && agent.tags.includes(activeTag));
+    }
     
-    // 如果是"全部"或"高级智能体"，我们把硬编码的理工助手加进去显示（仅作展示用，实际点击交互需要真实ID）
-    // 注意：这里只是前端展示层面的 Hack，实际逻辑中应该在数据库创建这个 Agent 并通过 API 返回
-    // 为了演示效果，我们先不合并 ADVANCED_AGENTS 到普通列表，而是单独渲染一个板块
-    
-    if (activeTag === '全部') return agents;
-    return agents.filter(agent => agent.tags && agent.tags.includes(activeTag));
-  }, [agents, activeTag]);
+    // 2. 排序
+    result.sort((a, b) => {
+      if (currentSort === 'hot') {
+        // 最受欢迎（降序）
+        const diff = (b.favorites_count || 0) - (a.favorites_count || 0);
+        if (diff !== 0) return diff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      } else if (currentSort === 'hot_asc') {
+        // 最受欢迎（升序）
+        const diff = (a.favorites_count || 0) - (b.favorites_count || 0);
+        if (diff !== 0) return diff;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else if (currentSort === 'new_asc') {
+        // 最新发布（升序）
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else {
+        // 最新发布（降序） - 默认
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+    });
 
-  if (isLoading && agents.length === 0) {
-    return (
-      <div className="min-h-screen bg-transparent flex items-center justify-center">
-        <Loading size="lg" text="加载智能体中..." />
-      </div>
-    );
-  }
+    return result;
+  }, [agents, activeTag, currentSort]);
+
+  // 优化加载体验：仅当正在加载且没有有效数据时显示Loading
+  const shouldShowLoading = isLoading && agents.length === 0;
 
   if (error) {
     return (
@@ -107,30 +126,84 @@ const AgentSquare: React.FC = () => {
           >
             <h2 className="text-3xl font-bold text-gray-900 mb-4">智能体广场</h2>
             <p className="text-lg text-gray-600 mb-8">浏览我们所有的AI智能体</p>
-            
-            {/* 标签筛选和排序 */}
-            <div className="flex flex-col md:flex-row justify-center items-center gap-4 max-w-4xl mx-auto">
-              <div className="flex flex-wrap justify-center gap-2 flex-1">
-                {tags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => handleTagClick(tag)}
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                      activeTag === tag
-                        ? 'bg-gray-900 text-white shadow-lg shadow-gray-200'
-                        : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))}
+          </motion.div>
+          
+          {/* 高级智能体板块 (始终显示，但根据标签筛选内容) */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-12"
+          >
+            <div className="flex items-center mb-6">
+              <Sparkles className="w-6 h-6 text-yellow-500 mr-2" />
+              <h3 className="text-2xl font-bold text-gray-900">高级智能体</h3>
+              <span className="ml-3 px-3 py-1 text-xs font-semibold text-yellow-700 bg-yellow-100 rounded-full">
+                RAG 增强
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {shouldShowLoading ? (
+                  // Loading 状态：显示骨架屏或 Loading 组件
+                  <div className="col-span-full py-12 flex justify-center items-center">
+                    <Loading size="md" text="正在加载高级智能体..." />
+                  </div>
+                ) : (
+                  <>
+                    {/* 筛选出高级智能体，同时应用当前的 activeTag 筛选（如果是"全部"，则显示所有高级智能体） */}
+                    {(() => {
+                        const advancedAgents = agents.filter(a => a.tags?.includes('高级智能体'));
+                        // 如果选了特定标签，高级智能体也应该参与筛选吗？
+                        // 用户需求："选择除了“全部”以外的标签时，还是会把高级智能体板块给隐藏掉，这不对"
+                        // -> 这意味着高级智能体板块应该始终显示，且内容应该是"高级智能体"的集合，不应该被 activeTag 过滤掉，或者应该被过滤？
+                        // 通常"高级置顶"意味着它们不受普通筛选影响，或者是受影响但板块保留。
+                        // 根据"高级智能体不参与筛选和排序"的描述，这里应该始终显示所有高级智能体。
+                        const displayAgents = advancedAgents; 
+
+                        if (displayAgents.length > 0) {
+                            return displayAgents.map((agent) => (
+                                <AgentCard key={agent.id} agent={agent} />
+                            ));
+                        } else {
+                            return (
+                                <div className="col-span-full bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+                                    <p className="text-yellow-800">
+                                    还没有检测到高级智能体。请在后台创建一个智能体，并添加 "高级智能体" 标签，且在 Config 中开启 RAG。
+                                    </p>
+                                </div>
+                            );
+                        }
+                    })()}
+                  </>
+                )}
+            </div>
+          </motion.div>
+
+          {/* 筛选和排序区域 - 移至高级智能体下方 */}
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm sticky top-20 z-40 backdrop-blur-xl bg-white/80">
+              <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 no-scrollbar">
+                <span className="text-sm font-medium text-gray-500 whitespace-nowrap">筛选：</span>
+                <div className="flex gap-2">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => handleTagClick(tag)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                        activeTag === tag
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* 排序下拉菜单 */}
-              <div className="relative min-w-[160px]">
+              <div className="relative min-w-[160px] flex-shrink-0">
                 <button
                   onClick={() => setIsSortOpen(!isSortOpen)}
-                  className="w-full px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center justify-between shadow-sm transition-all"
+                  className="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center justify-between shadow-sm transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <Filter className="w-4 h-4" />
@@ -156,67 +229,32 @@ const AgentSquare: React.FC = () => {
                   </div>
                 )}
               </div>
-            </div>
-          </motion.div>
-          
-          {/* 高级智能体板块 (仅在"全部"或"高级智能体"标签下显示) */}
-          {(activeTag === '全部' || activeTag === '高级智能体') && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-12"
-            >
-              <div className="flex items-center mb-6">
-                <Sparkles className="w-6 h-6 text-yellow-500 mr-2" />
-                <h3 className="text-2xl font-bold text-gray-900">高级智能体</h3>
-                <span className="ml-3 px-3 py-1 text-xs font-semibold text-yellow-700 bg-yellow-100 rounded-full">
-                  RAG 增强
-                </span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                 {/* 这里我们需要从数据库中获取真实的理工助手 Agent。
-                     为了演示，如果数据库里还没创建，您可以手动创建一个 Agent 并给它打上 "高级智能体" 的 Tag。
-                     下面的代码会过滤出所有带有 "高级智能体" Tag 的 Agent 显示在这里。
-                 */}
-                 {agents.filter(a => a.tags?.includes('高级智能体')).length > 0 ? (
-                    agents.filter(a => a.tags?.includes('高级智能体')).map((agent) => (
-                      <AgentCard key={agent.id} agent={agent} />
-                    ))
-                 ) : (
-                   // 如果没有真实的，显示一个占位提示卡片，引导用户去创建
-                   <div className="col-span-full bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-                     <p className="text-yellow-800">
-                       还没有检测到高级智能体。请在后台创建一个智能体，并添加 "高级智能体" 标签，且在 Config 中开启 RAG。
-                     </p>
-                   </div>
-                 )}
-              </div>
-            </motion.div>
-          )}
+          </div>
 
           {activeTag !== '高级智能体' && (
-            <>
+            <div className="relative min-h-[300px]"> {/* 确保有最小高度，防止 Loading 时高度坍塌 */}
               <div className="flex items-center mb-6">
                 <MessageSquare className="w-6 h-6 text-blue-500 mr-2" />
                 <h3 className="text-2xl font-bold text-gray-900">
-                  {activeTag === '全部' ? '所有智能体' : activeTag}
+                  {activeTag === '全部' ? '更多智能体' : activeTag}
                 </h3>
               </div>
-
-              {filteredAgents.filter(a => !a.tags?.includes('高级智能体')).length === 0 ? (
+              
+              {/* 如果没有智能体且不在加载中 */}
+              {filteredAgents.filter(a => !a.tags?.includes('高级智能体')).length === 0 && !isLoading ? (
                 <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
                   <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">暂无可用智能体</h3>
                   <p className="text-gray-600">该分类下暂无智能体</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 transition-opacity duration-300">
                   {filteredAgents.filter(a => !a.tags?.includes('高级智能体')).map((agent) => (
                     <AgentCard key={agent.id} agent={agent} />
                   ))}
                 </div>
               )}
-            </>
+            </div>
           )}
 
         </div>
