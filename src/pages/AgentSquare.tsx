@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { MessageSquare, Sparkles } from 'lucide-react';
+import { MessageSquare, Sparkles, ChevronDown, Filter } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AgentCard from '../components/AgentCard';
 import Loading from '../components/Loading';
@@ -18,20 +18,31 @@ const ADVANCED_AGENTS = [
   }
 ];
 
+type SortOption = 'new' | 'new_asc' | 'hot' | 'hot_asc';
+
 const AgentSquare: React.FC = () => {
   const { user, checkAuth } = useAuthStore();
   const { agents, isLoading, error, fetchAgents, fetchFavorites } = useAgentsStore();
   const [activeTag, setActiveTag] = React.useState('全部');
+  const [currentSort, setCurrentSort] = React.useState<SortOption>('new');
+  const [isSortOpen, setIsSortOpen] = React.useState(false);
 
   const tags = ['全部', '高级智能体', '效率工具', '文本创作', '学习教育', '代码助手', '生活方式', '游戏娱乐', '角色扮演'];
+
+  const sortOptions = [
+    { value: 'new', label: '最新发布 (降序)' },
+    { value: 'new_asc', label: '最新发布 (升序)' },
+    { value: 'hot', label: '最受欢迎 (降序)' },
+    { value: 'hot_asc', label: '最受欢迎 (升序)' },
+  ];
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
   useEffect(() => {
-    fetchAgents();
-  }, [fetchAgents]);
+    fetchAgents(activeTag, currentSort);
+  }, [fetchAgents, activeTag, currentSort]);
 
   useEffect(() => {
     if (user) {
@@ -41,6 +52,11 @@ const AgentSquare: React.FC = () => {
 
   const handleTagClick = (tag: string) => {
     setActiveTag(tag);
+  };
+
+  const handleSortChange = (sort: SortOption) => {
+    setCurrentSort(sort);
+    setIsSortOpen(false);
   };
 
   const filteredAgents = React.useMemo(() => {
@@ -92,21 +108,54 @@ const AgentSquare: React.FC = () => {
             <h2 className="text-3xl font-bold text-gray-900 mb-4">智能体广场</h2>
             <p className="text-lg text-gray-600 mb-8">浏览我们所有的AI智能体</p>
             
-            {/* 标签筛选 */}
-            <div className="flex flex-wrap justify-center gap-2 max-w-2xl mx-auto">
-              {tags.map((tag) => (
+            {/* 标签筛选和排序 */}
+            <div className="flex flex-col md:flex-row justify-center items-center gap-4 max-w-4xl mx-auto">
+              <div className="flex flex-wrap justify-center gap-2 flex-1">
+                {tags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => handleTagClick(tag)}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                      activeTag === tag
+                        ? 'bg-gray-900 text-white shadow-lg shadow-gray-200'
+                        : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+
+              {/* 排序下拉菜单 */}
+              <div className="relative min-w-[160px]">
                 <button
-                  key={tag}
-                  onClick={() => handleTagClick(tag)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                    activeTag === tag
-                      ? 'bg-blue-600 text-white shadow-md transform scale-105'
-                      : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
-                  }`}
+                  onClick={() => setIsSortOpen(!isSortOpen)}
+                  className="w-full px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center justify-between shadow-sm transition-all"
                 >
-                  {tag}
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4" />
+                    <span>{sortOptions.find(opt => opt.value === currentSort)?.label}</span>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${isSortOpen ? 'rotate-180' : ''}`} />
                 </button>
-              ))}
+
+                {isSortOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                    {sortOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => handleSortChange(option.value as SortOption)}
+                        className={`w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 transition-colors flex items-center justify-between ${
+                          currentSort === option.value ? 'text-blue-600 bg-blue-50/50 font-medium' : 'text-gray-600'
+                        }`}
+                      >
+                        {option.label}
+                        {currentSort === option.value && <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
           

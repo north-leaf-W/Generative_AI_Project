@@ -34,6 +34,7 @@ export const API_ENDPOINTS = {
   },
   chat: {
     stream: `${API_BASE_URL}/chat/stream`,
+    upload: `${API_BASE_URL}/chat/upload`, // Add upload endpoint
     history: (sessionId: string) => `${API_BASE_URL}/chat/history/${sessionId}`,
   },
   notifications: {
@@ -55,10 +56,14 @@ export const apiRequest = async <T = any>(
 ): Promise<T> => {
   const token = localStorage.getItem('token');
   
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...options.headers,
+  const headers: Record<string, string> = {
+    ...options.headers as Record<string, string>,
   };
+
+  // Only set Content-Type if body is not FormData and not already set
+  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;

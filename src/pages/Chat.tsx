@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check, Database } from 'lucide-react';
+import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check, Database, Paperclip, Image as ImageIcon, XCircle, FileText, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 import { useAgentsStore } from '../stores/agents';
 import { Agent, Session, Message } from '../../shared/types';
+import { API_ENDPOINTS, apiRequest } from '../config/api';
 import { AnimatePresence, motion } from 'framer-motion';
 import PixelAgents from '../components/PixelAgents';
+import MarkdownRenderer from '../components/MarkdownRenderer';
 import ConfirmationModal from '../components/ConfirmationModal';
 import Loading from '../components/Loading';
 
@@ -49,10 +51,29 @@ const Chat: React.FC = () => {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitleInput, setEditTitleInput] = useState('');
   const [streamingContent, setStreamingContent] = useState('');
+  const [userScrolledUp, setUserScrolledUp] = useState(false); // Track if user manually scrolled up
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({}); // Track expanded file contents
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  
+  // File Upload State
+  const [isUploading, setIsUploading] = useState(false);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; content: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentAgent = localAgent || agents.find(agent => agent.id === agentId) || myAgents.find(agent => agent.id === agentId);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 200) + 'px';
+    }
+  }, [inputMessage]);
 
   // 当切换智能体时，根据智能体配置初始化 RAG 开关状态
   useEffect(() => {
@@ -61,14 +82,37 @@ const Chat: React.FC = () => {
     }
   }, [currentAgent?.id, currentAgent?.config?.rag_enabled]);
 
-  // 自动滚动到底部
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // 自动滚动到底部逻辑优化
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (messagesEndRef.current) {
+       messagesEndRef.current.scrollIntoView({ behavior });
+    }
   };
 
+  // 监听滚动事件，判断用户是否向上滚动
+  const handleScroll = () => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      // 如果距离底部超过 100px，认为用户向上滚动了
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      setUserScrolledUp(!isNearBottom);
+    }
+  };
+
+  // 仅当用户未向上滚动时，才自动滚动到底部 (用于流式输出时)
   useEffect(() => {
-    scrollToBottom();
+    if (!userScrolledUp) {
+      scrollToBottom();
+    }
   }, [messages, streamingContent]);
+
+  // 初始化聊天或发送新消息时，强制滚动到底部
+  useEffect(() => {
+    // 如果是第一条消息或者正在加载历史记录结束，强制滚动
+    if (!messagesLoading) {
+       scrollToBottom('auto');
+    }
+  }, [messagesLoading, currentSession?.id]);
 
   // 初始化聊天数据
   useEffect(() => {
@@ -137,8 +181,57 @@ const Chat: React.FC = () => {
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input value so same file can be selected again
+    e.target.value = '';
+
+    const isImage = file.type.startsWith('image/');
+
+    if (isImage) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        alert('图片大小不能超过 5MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target?.result as string;
+        setPendingImages(prev => [...prev, base64]);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // Document upload
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await apiRequest<{ success: boolean; data: { text: string } }>(
+          API_ENDPOINTS.chat.upload,
+          {
+            method: 'POST',
+            body: formData
+          }
+        );
+
+        if (response.success && response.data.text) {
+            setPendingFiles(prev => [...prev, { name: file.name, content: response.data.text }]);
+            // Focus input
+            setTimeout(() => inputRef.current?.focus(), 100);
+          }
+        } catch (error) {
+        console.error('Upload error:', error);
+        alert('文件解析失败，请稍后重试');
+      } finally {
+        setIsUploading(false);
+      }
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !agentId) return;
+    if ((!inputMessage.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || !agentId) return;
     
     // 仅当正在流式传输且是当前会话时才阻止发送
     if (isStreaming && currentSession?.id === streamingSessionId) return;
@@ -158,13 +251,33 @@ const Chat: React.FC = () => {
     if (!targetSessionId) return;
 
     const message = inputMessage.trim();
+    // 构造最终消息内容，包含附件文本
+    // 修正：不再拼接文件内容到消息文本中，而是通过 files 字段传递
+    let finalMessage = message;
+    
+    // 如果只有图片没有文字，给一个默认提示
+    if (!finalMessage && (pendingImages.length > 0 || pendingFiles.length > 0)) {
+       if (pendingImages.length > 0) {
+          finalMessage = '发送了图片';
+       } else {
+          finalMessage = '发送了文件';
+       }
+    }
+    
     setInputMessage('');
     setStreamingContent('');
+    
+    // 保存当前状态用于失败重试
+    const currentImages = [...pendingImages];
+    const currentFiles = [...pendingFiles];
+    
+    setPendingImages([]); // Clear images immediately
+    setPendingFiles([]); // Clear files immediately
 
     try {
       await sendMessage(
         targetSessionId, 
-        message, 
+        finalMessage, 
         agentId, 
         (token) => {
           // 仅当此 token 属于当前正在流式传输的会话时才更新 UI
@@ -174,7 +287,9 @@ const Chat: React.FC = () => {
           }
         }, 
         isWebSearchEnabled, 
-        isRAGEnabled
+        isRAGEnabled,
+        currentImages, // Pass images
+        currentFiles // Pass files
       );
       
       // 仅当此会话结束流式传输时才清空（避免清空了新会话的内容）
@@ -199,6 +314,8 @@ const Chat: React.FC = () => {
       // 如果出错，且是当前会话，把消息放回输入框，方便用户重试
       if (currentSession?.id === targetSessionId) {
         setInputMessage(message);
+        setPendingImages(currentImages); // Restore images
+        setPendingFiles(currentFiles); // Restore files
         alert('发送消息失败，请检查网络或后端服务是否正常。');
       }
     }
@@ -263,6 +380,19 @@ const Chat: React.FC = () => {
     } else {
       return `${date.getFullYear()}年${(date.getMonth() + 1).toString().padStart(2, '0')}月${date.getDate().toString().padStart(2, '0')}日 ${timeStr}`;
     }
+  };
+
+  const toggleFileExpand = (fileId: string) => {
+    setExpandedFiles(prev => ({
+      ...prev,
+      [fileId]: !prev[fileId]
+    }));
+  };
+
+  const handleCopyMessage = (content: string, messageId: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedMessageId(messageId);
+    setTimeout(() => setCopiedMessageId(null), 2000);
   };
 
   if (!currentAgent) {
@@ -517,7 +647,11 @@ const Chat: React.FC = () => {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 md:px-6 md:py-4">
+        <div 
+          className="flex-1 overflow-y-auto px-4 py-3 md:px-6 md:py-4"
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+        >
           {messagesLoading && messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-6 h-6 md:w-8 md:h-8 animate-spin text-blue-500" />
@@ -557,14 +691,122 @@ const Chat: React.FC = () => {
 
                     {/* Message Content */}
                     <div className={`flex-1 ${
-                      message.role === 'user' ? 'text-right' : 'text-left'
+                      message.role === 'user' ? 'text-left' : 'text-left'
                     }`}>
                       <div className={`inline-block px-4 py-3 rounded-2xl shadow-sm ${
                         message.role === 'user'
                           ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none'
                           : 'bg-white text-gray-800 rounded-bl-none border border-gray-100'
                       }`}>
-                        <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                        {/* Display Images if any */}
+                        {message.images && message.images.length > 0 && (
+                          <div className={`flex flex-wrap gap-2 mb-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            {message.images.map((img, idx) => (
+                              <img 
+                                key={idx} 
+                                src={img} 
+                                alt="attachment" 
+                                className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                                onClick={() => window.open(img, '_blank')}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Display Files if any */}
+                        {message.files && message.files.length > 0 && (
+                          <div className="flex flex-col gap-2 mb-2">
+                            {message.files.map((file, idx) => {
+                               const fileId = `${message.id}-file-${idx}`;
+                               const isExpanded = expandedFiles[fileId];
+                               return (
+                                 <div key={idx} className={`rounded-xl border overflow-hidden shadow-sm transition-all duration-200 ${
+                                   message.role === 'user' 
+                                     ? 'bg-blue-50/10 border-blue-200/30' 
+                                     : 'bg-blue-50 border-blue-100'
+                                 }`}>
+                                    <div 
+                                      className={`flex items-center justify-between px-4 py-3 cursor-pointer ${
+                                        message.role === 'user'
+                                          ? 'hover:bg-white/10'
+                                          : 'hover:bg-blue-100/50'
+                                      }`}
+                                      onClick={() => toggleFileExpand(fileId)}
+                                    >
+                                      <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                          message.role === 'user'
+                                            ? 'bg-white/20'
+                                            : 'bg-blue-100'
+                                        }`}>
+                                          <FileText className={`w-5 h-5 ${
+                                            message.role === 'user' ? 'text-white' : 'text-blue-600'
+                                          }`} />
+                                        </div>
+                                        <div className="flex flex-col overflow-hidden min-w-0">
+                                          <span className={`text-sm font-semibold truncate ${
+                                            message.role === 'user' ? 'text-white' : 'text-blue-900'
+                                          }`}>{file.name}</span>
+                                          <span className={`text-xs mt-0.5 ${
+                                            message.role === 'user' ? 'text-blue-100/80' : 'text-blue-500'
+                                          }`}>已解析</span>
+                                        </div>
+                                      </div>
+                                      <button className={`p-1.5 rounded-full transition-colors ml-2 flex-shrink-0 ${
+                                        message.role === 'user'
+                                          ? 'text-blue-100 hover:bg-white/20'
+                                          : 'text-blue-400 hover:bg-blue-100'
+                                      }`}>
+                                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                      </button>
+                                    </div>
+                                    
+                                    <AnimatePresence>
+                                      {isExpanded && (
+                                        <motion.div 
+                                          initial={{ height: 0, opacity: 0 }}
+                                          animate={{ height: 'auto', opacity: 1 }}
+                                          exit={{ height: 0, opacity: 0 }}
+                                          className={`border-t ${
+                                            message.role === 'user'
+                                              ? 'border-white/10 bg-black/10'
+                                              : 'border-blue-100 bg-white'
+                                          }`}
+                                        >
+                                          <div className={`p-4 text-xs font-mono whitespace-pre-wrap max-h-[300px] overflow-y-auto text-left ${
+                                            message.role === 'user' ? 'text-blue-50' : 'text-gray-600'
+                                          }`}>
+                                            {file.content}
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                 </div>
+                               );
+                            })}
+                          </div>
+                        )}
+
+                        {message.content && !message.content.includes('【附件：') && (
+                          <div className={`relative group ${message.role === 'assistant' ? 'markdown-container' : ''}`}>
+                            {message.role === 'assistant' ? (
+                              <>
+                                <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                  <button
+                                    onClick={() => handleCopyMessage(message.content, message.id)}
+                                    className="p-1.5 bg-white border border-gray-200 shadow-sm rounded-md hover:bg-gray-50 text-gray-500"
+                                    title="复制消息"
+                                  >
+                                    {copiedMessageId === message.id ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                </div>
+                                <MarkdownRenderer content={message.content} />
+                              </>
+                            ) : (
+                              <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <p className="text-xs text-gray-400 mt-1.5 px-1">
                         {formatTime(message.created_at)}
@@ -586,10 +828,10 @@ const Chat: React.FC = () => {
                     <div className="flex-1">
                       <div className="inline-block px-4 py-3 rounded-2xl bg-white text-gray-800 rounded-bl-none border border-gray-100 shadow-sm">
                         {streamingContent ? (
-                          <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">
-                            {streamingContent}
+                          <div className="markdown-container">
+                            <MarkdownRenderer content={streamingContent} />
                             <span className="inline-block w-1.5 h-4 ml-1 bg-blue-500 animate-pulse align-middle"></span>
-                          </p>
+                          </div>
                         ) : (
                           <div className="flex space-x-1 py-1">
                             <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-gray-400 rounded-full animate-bounce"></div>
@@ -615,54 +857,113 @@ const Chat: React.FC = () => {
               <PixelAgents />
             </div>
 
-            <div className="bg-white rounded-[2rem] shadow-xl border border-white/50 p-2 flex items-end space-x-2 transition-all hover:shadow-2xl relative z-20">
-              {currentAgent?.config?.rag_enabled && (
+            <div className="bg-white rounded-[2rem] shadow-xl border border-white/50 p-2 flex flex-col transition-all hover:shadow-2xl relative z-20">
+              
+              {/* Attachments Preview Area */}
+              {(pendingImages.length > 0 || pendingFiles.length > 0) && (
+                <div className="flex flex-wrap gap-2 px-3 pt-3 pb-1 border-b border-gray-100 mb-1">
+                  {/* Pending Images */}
+                  {pendingImages.map((img, idx) => (
+                    <div key={`img-${idx}`} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-200 bg-gray-50 group">
+                      <img src={img} className="w-full h-full object-cover" alt="upload preview" />
+                      <button 
+                        onClick={() => setPendingImages(p => p.filter((_, i) => i !== idx))}
+                        className="absolute top-0.5 right-0.5 text-gray-500 hover:text-red-500 bg-white/90 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Pending Files */}
+                  {pendingFiles.map((file, idx) => (
+                    <div key={`file-${idx}`} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg border border-blue-100 text-xs h-14 min-w-[120px] relative group">
+                      <div className="flex flex-col justify-center overflow-hidden">
+                         <span className="font-medium truncate w-full" title={file.name}>{file.name}</span>
+                         <span className="text-[10px] text-blue-400">已解析</span>
+                      </div>
+                      <button 
+                        onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))}
+                        className="absolute -top-1.5 -right-1.5 text-gray-400 hover:text-red-500 bg-white rounded-full p-0.5 shadow-sm border border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-end space-x-2">
+                {/* Hidden File Input */}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept=".pdf,.docx,.xlsx,.xls,.md,.txt,.jpg,.jpeg,.png,.webp" 
+                  onChange={handleFileSelect}
+                />
+                
                 <button
-                  onClick={() => setIsRAGEnabled(!isRAGEnabled)}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
                   className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
-                    isRAGEnabled 
-                      ? 'bg-purple-100 text-purple-600 hover:bg-purple-200' 
+                    isUploading
+                      ? 'bg-gray-100 text-gray-400 animate-pulse cursor-wait'
                       : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                   }`}
-                  title={isRAGEnabled ? "关闭知识库检索" : "开启知识库检索"}
+                  title="上传附件 (支持文档和图片)"
                 >
-                  <Database className="w-5 h-5" />
+                  {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
                 </button>
-              )}
-              <button
-                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
-                  isWebSearchEnabled 
-                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
-                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                }`}
-                title={isWebSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
-              >
-                <Globe className="w-5 h-5" />
-              </button>
-              <div className="flex-1">
-                <textarea
-                  ref={inputRef}
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="和 Agent 一起开始你的工作..."
-                  disabled={isStreaming && currentSession?.id === streamingSessionId}
-                  className="w-full px-4 py-3 bg-transparent border-none focus:ring-0 resize-none text-gray-800 placeholder-gray-400 text-base min-h-[56px] max-h-[200px]"
-                  rows={1}
-                />
-              </div>
-              <button
-                onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || (isStreaming && currentSession?.id === streamingSessionId)}
-                className="p-3 bg-gray-900 text-white rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex-shrink-0 mb-1 mr-1"
-              >
-                {isStreaming && currentSession?.id === streamingSessionId ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
+
+                {currentAgent?.config?.rag_enabled && (
+                  <button
+                    onClick={() => setIsRAGEnabled(!isRAGEnabled)}
+                    className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
+                      isRAGEnabled 
+                        ? 'bg-purple-100 text-purple-600 hover:bg-purple-200' 
+                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                    }`}
+                    title={isRAGEnabled ? "关闭知识库检索" : "开启知识库检索"}
+                  >
+                    <Database className="w-5 h-5" />
+                  </button>
                 )}
-              </button>
+                <button
+                  onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                  className={`p-3 rounded-full transition-all duration-200 flex-shrink-0 mb-1 ml-1 ${
+                    isWebSearchEnabled 
+                      ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
+                      : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title={isWebSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
+                >
+                  <Globe className="w-5 h-5" />
+                </button>
+                <div className="flex-1">
+                  <textarea
+                    ref={inputRef}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="和 Agent 一起开始你的工作..."
+                    disabled={isStreaming && currentSession?.id === streamingSessionId}
+                    className="w-full px-4 py-3 bg-transparent border-none focus:ring-0 resize-none text-gray-800 placeholder-gray-400 text-base min-h-[56px] max-h-[200px]"
+                    rows={1}
+                  />
+                </div>
+                <button
+                  onClick={handleSendMessage}
+                  disabled={(!inputMessage.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || (isStreaming && currentSession?.id === streamingSessionId)}
+                  className="p-3 bg-gray-900 text-white rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex-shrink-0 mb-1 mr-1"
+                >
+                  {isStreaming && currentSession?.id === streamingSessionId ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

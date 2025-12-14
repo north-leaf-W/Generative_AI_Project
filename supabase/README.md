@@ -51,6 +51,8 @@
 - `user_id`: UUID (FK -> users.id)
 - `role`: VARCHAR(20) - 消息角色，取值: `'user'`, `'assistant'`, `'system'`
 - `content`: TEXT - 消息内容
+- `images`: TEXT[] - 图片 URL 数组 (支持多模态输入)
+- `files`: JSONB - 附件文件列表 (包含 name, type, url, size 等元数据)
 - `created_at`: TIMESTAMPTZ
 
 #### `documents` (知识库文档表 - RAG)

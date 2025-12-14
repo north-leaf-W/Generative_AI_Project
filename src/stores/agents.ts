@@ -10,7 +10,7 @@ interface AgentsState {
   error: string | null;
   
   // Actions
-  fetchAgents: (tag?: string, sort?: 'hot' | 'new') => Promise<void>;
+  fetchAgents: (tag?: string, sort?: 'hot' | 'new' | 'hot_asc' | 'new_asc') => Promise<void>;
   fetchMyAgents: () => Promise<void>;
   fetchFavorites: () => Promise<void>;
   toggleFavorite: (agent: Agent) => Promise<boolean>;
@@ -32,7 +32,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   isLoading: true, // 初始为加载中
   error: null,
 
-  fetchAgents: async (tag?: string, sort?: 'hot' | 'new') => {
+  fetchAgents: async (tag?: string, sort?: 'hot' | 'new' | 'hot_asc' | 'new_asc') => {
     set({ isLoading: true, error: null });
     
     try {

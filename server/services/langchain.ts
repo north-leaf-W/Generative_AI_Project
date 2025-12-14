@@ -18,9 +18,10 @@ const embeddings = new AlibabaTongyiEmbeddings();
 const reranker = new AlibabaTongyiRerank();
 
 // 创建阿里云DashScope模型的LangChain实例
-export const createDashScopeModel = () => {
+export const createDashScopeModel = (modelName?: string) => {
   const apiKey = process.env.DASHSCOPE_API_KEY;
-  const model = process.env.DASHSCOPE_MODEL || 'qwen-turbo';
+  // 优先使用传入的模型名称，否则使用环境变量，最后回退到 qwen-turbo
+  const model = modelName || process.env.DASHSCOPE_MODEL || 'qwen-turbo';
 
   if (!apiKey) {
     throw new Error('DASHSCOPE_API_KEY is not configured');
@@ -36,7 +37,7 @@ export const createDashScopeModel = () => {
     },
     streaming: true,
     temperature: 0.7,
-    maxTokens: 2000,
+    maxTokens: 4096,
   });
 };
 
@@ -161,10 +162,19 @@ export const generateAIResponse = async (
   messageHistory: Array<{ role: string; content: string }>,
   res: Response,
   enableWebSearch: boolean = false,
-  enableRAG: boolean = false
+  enableRAG: boolean = false,
+  images?: string[]
 ) : Promise<string> => {
   try {
-    const model = createDashScopeModel();
+    // 如果有图片，强制使用多模态模型 (例如 qwen-vl-max 或 qwen-vl-plus)
+    // 注意：qwen-max 不支持图片，必须切换
+    let modelName = undefined;
+    if (images && images.length > 0) {
+      // 优先使用环境变量配置的 VL 模型，默认为 qwen-vl-max
+      modelName = process.env.DASHSCOPE_VL_MODEL || 'qwen-vl-max';
+    }
+
+    const model = createDashScopeModel(modelName);
     let aiResponse = '';
     const append = (t: string) => { aiResponse += t; };
     let resolveFn: (text: string) => void = () => {};
@@ -172,7 +182,7 @@ export const generateAIResponse = async (
     const streamHandler = createStreamHandler(res, append, resolveFn);
 
     // 处理上下文 (Web Search & RAG)
-    let finalMessage = message;
+    let finalMessage: string | any[] = message;
     let contextParts: string[] = [];
     
     // Web Search
@@ -219,16 +229,48 @@ export const generateAIResponse = async (
       }
     }
 
-    // 如果有上下文信息，构建最终的 Prompt
+    // 如果有上下文信息，构建最终的 Prompt 文本
+    let contextPrompt = '';
     if (contextParts.length > 0) {
-      finalMessage = `请基于以下提供的上下文信息回答用户的问题。
+      contextPrompt = `请基于以下提供的上下文信息回答用户的问题。
 上下文可能包含来自互联网的搜索结果和本地知识库的检索内容。
 如果上下文不包含答案，请说明你不知道，不要编造。
 
 ${contextParts.join('\n\n====================\n\n')}
 
 用户问题:
-${message}`;
+`;
+      // 注意：这里我们只是准备了前缀，实际组合在下面
+    }
+
+    // 构建消息内容
+    if (images && images.length > 0) {
+      // 多模态消息构造
+      const content: any[] = [];
+      
+      // 如果有上下文，先加 text
+      if (contextPrompt) {
+        content.push({ type: 'text', text: contextPrompt + message });
+      } else {
+        content.push({ type: 'text', text: message });
+      }
+
+      // 添加图片
+      images.forEach(img => {
+        content.push({
+          type: 'image_url',
+          image_url: {
+            url: img // 假设是 URL 或 base64 data URI
+          }
+        });
+      });
+      
+      finalMessage = content;
+    } else {
+      // 纯文本消息
+      if (contextPrompt) {
+        finalMessage = contextPrompt + message;
+      }
     }
 
     // 创建系统提示词

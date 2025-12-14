@@ -1,22 +1,60 @@
 import express from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { generateAIResponse, generateSessionTitle } from '../services/langchain.js';
+import { extractTextFromFile } from '../utils/document-parser.js';
 import { ApiResponse, ChatRequest, Message } from '../../shared/types.js';
 
 const router = express.Router();
+const upload = multer({ dest: path.join(os.tmpdir(), 'trae-uploads') });
+
+// 上传并解析文件接口
+router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const filePath = req.file.path;
+    const originalName = req.file.originalname;
+
+    try {
+      console.log(`Processing uploaded file: ${originalName}`);
+      const { text } = await extractTextFromFile(filePath, originalName);
+      
+      // Clean up file
+      fs.unlinkSync(filePath);
+
+      res.json({ success: true, data: { text } });
+    } catch (error) {
+      console.error('Error parsing file:', error);
+      // Clean up file even on error
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      throw error;
+    }
+  } catch (error: any) {
+    console.error('File upload error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to process file' });
+  }
+});
 
 // 流式聊天接口
 router.post('/stream', authenticateToken, async (req, res) => {
   try {
-    const { sessionId, message, agentId, webSearch, enableRAG: enableRAGParam }: ChatRequest = req.body;
+    const { sessionId, message, agentId, webSearch, enableRAG: enableRAGParam, images, files }: ChatRequest = req.body;
     const userId = req.user!.id;
 
     // 验证输入
-    if (!sessionId || !message || !agentId) {
+    if (!sessionId || (!message && (!images || images.length === 0) && (!files || files.length === 0)) || !agentId) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Session ID, message, and agent ID are required' 
+        error: 'Session ID, message (or attachments), and agent ID are required' 
       });
     }
 
@@ -47,6 +85,8 @@ router.post('/stream', authenticateToken, async (req, res) => {
         user_id: userId,
         role: 'user',
         content: message,
+        images: images || [], // 存储图片
+        files: files || [], // 存储文件
         created_at: new Date().toISOString()
       })
       .select('id')
@@ -102,7 +142,20 @@ router.post('/stream', authenticateToken, async (req, res) => {
     console.log(`[Chat] Session: ${sessionId}, Agent: ${agentId}`);
     console.log(`[Chat] RAG Status - Param: ${enableRAGParam}, Config: ${configEnableRAG}, Final: ${enableRAG}`);
 
-    const aiResponse = await generateAIResponse(message, systemPrompt, messageHistory, res, webSearch, enableRAG);
+    // 构造 Prompt 上下文
+    // 如果有文件内容，拼接到 Prompt 中
+    // 注意：这里修改 finalMessage 仅用于发送给 AI，不影响数据库中存储的原始 message
+    let finalMessage = message;
+    if (files && files.length > 0) {
+       const filesContent = files.map(f => `\n\n【附件：${f.name}】\n${f.content}\n\n`).join('');
+       finalMessage = (finalMessage + filesContent).trim();
+    }
+    // 如果只有图片/文件没有文字，给一个默认提示 (用于 AI 理解，如果它不支持空内容)
+    if (!finalMessage && (images?.length || files?.length)) {
+       finalMessage = '请分析上传的内容。';
+    }
+
+    const aiResponse = await generateAIResponse(finalMessage, systemPrompt, messageHistory, res, webSearch, enableRAG, images);
 
     try {
       if (aiResponse && aiResponse.trim()) {

@@ -45,8 +45,25 @@ router.get('/', optionalAuth, async (req, res) => {
       query = query.contains('tags', [req.query.tag]);
     }
 
-    // 按创建时间排序（默认）
-    query = query.order('created_at', { ascending: true });
+    // 排序逻辑优化
+    // 'hot': 按收藏数降序 (默认)
+    // 'hot_asc': 按收藏数升序
+    // 'new': 按创建时间降序
+    // 'new_asc': 按创建时间升序
+    
+    // 默认按创建时间降序 (new)
+    let sortOrder: 'asc' | 'desc' = 'desc';
+    let sortField = 'created_at';
+    
+    if (req.query.sort === 'new_asc') {
+        sortOrder = 'asc';
+    } else if (req.query.sort === 'hot_asc') {
+        // 如果是按热度升序，为了稳定，先按时间升序获取数据，然后在内存中排序
+        sortOrder = 'asc'; 
+    }
+    
+    // 无论如何，先从数据库按时间排序获取数据，保证基准稳定性
+    query = query.order('created_at', { ascending: sortOrder === 'asc' });
       
     const { data: publicAgents, error: publicError } = await query;
       
@@ -58,9 +75,19 @@ router.get('/', optionalAuth, async (req, res) => {
       favorites_count: agent.favorites_count || 0
     }));
 
-    // 如果需要按热度排序
+    // 内存排序处理热度
     if (req.query.sort === 'hot') {
-        allAgents.sort((a: any, b: any) => (b.favorites_count || 0) - (a.favorites_count || 0));
+        allAgents.sort((a: any, b: any) => {
+            const countDiff = (b.favorites_count || 0) - (a.favorites_count || 0);
+            if (countDiff !== 0) return countDiff;
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+    } else if (req.query.sort === 'hot_asc') {
+        allAgents.sort((a: any, b: any) => {
+            const countDiff = (a.favorites_count || 0) - (b.favorites_count || 0);
+            if (countDiff !== 0) return countDiff;
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
     }
     
     // 填充作者信息

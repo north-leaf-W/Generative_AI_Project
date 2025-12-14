@@ -82,6 +82,8 @@ export interface Message {
   user_id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  images?: string[]; // 图片 URL 或 Base64 数组
+  files?: { name: string; content: string }[]; // 附件文件列表
   created_at: string;
 }
 
@@ -121,6 +123,8 @@ export interface ChatRequest {
   agentId: string;
   webSearch?: boolean;
   enableRAG?: boolean;
+  images?: string[]; // Array of base64 strings or URLs
+  files?: { name: string; content: string }[]; // Array of file attachments
 }
 
 export interface ChatResponse {

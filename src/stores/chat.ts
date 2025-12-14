@@ -17,7 +17,7 @@ interface ChatState {
   createSession: (agentId: string, title?: string, mode?: 'public' | 'dev') => Promise<Session | null>;
   updateSession: (sessionId: string, updates: Partial<Session>) => Promise<Session | null>;
   fetchMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean) => Promise<void>;
+  sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean, images?: string[], files?: { name: string; content: string }[]) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   setCurrentSession: (session: Session | null) => void;
   clearChat: () => void;
@@ -189,7 +189,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean) => {
+  sendMessage: async (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean, images?: string[], files?: { name: string; content: string }[]) => {
     // 即使切换了会话，我们也允许后台继续接收数据，但不更新 UI 的 streamingSessionId
     set({ isStreaming: true, streamingSessionId: sessionId, error: null });
     
@@ -200,10 +200,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         session_id: sessionId,
         user_id: '', // 将在服务器端设置
         role: 'user',
-        content: message,
+        content: message, 
+        images: images, // 存储图片以便在UI显示
+        files: files, // 存储文件以便在UI显示
         created_at: new Date().toISOString()
       };
       
+      // TODO: 如果需要支持图片在 UI 上显示，应该扩展 Message 类型或 content 格式
+      // 目前后端处理 images 参数，但前端 Message 类型只有 content: string
+      // 我们可以在 content 中附加一个特殊的标记或 JSON，或者在 Chat.tsx 中渲染时做处理
+      // 简单起见，我们假设 images 会被后端处理，而前端在这里只展示文本
+      // 如果用户上传了图片，我们可以临时追加到 content 里给用户看（如果是 base64 会太长）
+      // 更好的做法是：UI 组件负责显示"正在发送图片..."，或者我们约定一种 markdown 格式
+
       set(state => {
         // 安全检查：确保我们是在正确的消息列表上追加
         // 只有当 messages 不为空，且其 sessionId 与当前发送消息的 sessionId 一致时，才使用 messages 作为基准
@@ -247,7 +256,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       await streamRequest(
         API_ENDPOINTS.chat.stream,
-        { sessionId, message, agentId, webSearch, enableRAG },
+        { sessionId, message, agentId, webSearch, enableRAG, images, files },
         (data) => {
           if (data.error) {
             throw new Error(data.error);
