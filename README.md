@@ -34,7 +34,7 @@
 ## 🛠 技术栈
 
 - **前端**：`React 18`、`TypeScript`、`Vite`、`TailwindCSS`、`Zustand` (状态管理)、`React Router`
-- **后端**：`Express 4`、`TypeScript`、`LangChain`
+- **后端**：`Express 4`、`TypeScript`、`LangChain`、`LangGraph` (多智能体编排)
 - **数据库**：`Supabase (PostgreSQL)` + `pgvector` (向量检索)
 - **AI 模型**：
   - LLM: `阿里云 DashScope (通义千问)`

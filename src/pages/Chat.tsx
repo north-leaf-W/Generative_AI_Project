@@ -675,16 +675,24 @@ const Chat: React.FC = () => {
                     message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
                   }`}>
                     {/* Avatar */}
-                    <div className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0">
+                    <div className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
                       {message.role === 'user' ? (
-                        <div className="w-6 h-6 md:w-8 md:h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                          <User className="w-3 h-3 md:w-4 md:h-4 text-white" />
-                        </div>
+                        user?.avatar_url ? (
+                          <img 
+                            src={user.avatar_url} 
+                            alt="User" 
+                            className="w-full h-full object-cover" 
+                          />
+                        ) : (
+                          <div className="w-6 h-6 md:w-8 md:h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                            <User className="w-3 h-3 md:w-4 md:h-4 text-white" />
+                          </div>
+                        )
                       ) : (
                         <img
                           src={currentAgent.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentAgent.name)}&background=random`}
                           alt={currentAgent.name}
-                          className="w-6 h-6 md:w-8 md:h-8 rounded-full object-cover"
+                          className="w-full h-full object-cover"
                         />
                       )}
                     </div>

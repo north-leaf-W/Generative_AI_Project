@@ -18,7 +18,7 @@ const embeddings = new AlibabaTongyiEmbeddings();
 const reranker = new AlibabaTongyiRerank();
 
 // 创建阿里云DashScope模型的LangChain实例
-export const createDashScopeModel = (modelName?: string) => {
+export const createDashScopeModel = (modelName?: string, options?: { enableSearch?: boolean }) => {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   // 优先使用传入的模型名称，否则使用环境变量，最后回退到 qwen-turbo
   const model = modelName || process.env.DASHSCOPE_MODEL || 'qwen-turbo';
@@ -27,7 +27,7 @@ export const createDashScopeModel = (modelName?: string) => {
     throw new Error('DASHSCOPE_API_KEY is not configured');
   }
 
-  console.log(`Creating DashScope model instance with model: ${model}`);
+  console.log(`Creating DashScope model instance with model: ${model}, search: ${options?.enableSearch}`);
 
   return new ChatOpenAI({
     modelName: model,
@@ -38,6 +38,9 @@ export const createDashScopeModel = (modelName?: string) => {
     streaming: true,
     temperature: 0.7,
     maxTokens: 4096,
+    modelKwargs: {
+      enable_search: options?.enableSearch
+    }
   });
 };
 

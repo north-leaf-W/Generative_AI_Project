@@ -149,6 +149,8 @@ Bucket: `agent-avatars` / `user-avatars`
 15. `20251213_add_hybrid_search.sql`: **添加混合检索** (hybrid_match_documents 函数)。
 16. `20251214_add_favorites_count_view.sql`: **添加收藏数统计视图** (创建 public_agents_with_counts 视图，优化热门智能体查询性能)。
 17. `20251214_fix_hybrid_search_rpc.sql`: **修复混合检索 RPC** (修正参数类型匹配问题)。
+18. `20251217_fix_view_security.sql`: **修复视图安全警告** (将收藏计数逻辑下沉至 `get_agent_favorites_count` 函数，视图改为 Security Invoker)。
+19. `20251217_add_metadata_to_messages.sql`: **消息元数据扩展** (messages 表添加 metadata 字段，sessions 表 agent_id 允许为空以支持综合对话)。
 
 ---
 

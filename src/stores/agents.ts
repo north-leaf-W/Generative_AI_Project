@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Agent, ApiResponse, CreateAgentRequest } from '../../shared/types';
 import { API_ENDPOINTS, apiRequest } from '../config/api';
+import { useAuthStore } from './auth';
 
 interface AgentsState {
   agents: Agent[];
@@ -169,6 +170,10 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       }
     } catch (error) {
       console.error('Fetch favorites error', error);
+      const errorMessage = error instanceof Error ? error.message : '';
+      if (errorMessage.includes('用户不存在') || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        useAuthStore.getState().logout();
+      }
       set({ isLoading: false });
     }
   },

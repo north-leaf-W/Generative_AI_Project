@@ -209,9 +209,9 @@ export const useAuthStore = create<AuthState>()(
           
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           
-          // 只有在明确的认证错误（401/403）时才清除 Token
+          // 只有在明确的认证错误（401/403）或用户不存在时才清除 Token
           // 避免因为网络波动（Failed to fetch, ERR_ABORTED）导致用户意外登出
-          if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('Unauthorized')) {
+          if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('Unauthorized') || errorMessage.includes('用户不存在')) {
             localStorage.removeItem('token');
             set({ 
               user: null, 

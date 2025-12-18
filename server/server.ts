@@ -14,6 +14,7 @@ import sessionRoutes from './routes/sessions.js';
 import chatRoutes from './routes/chat.js';
 import notificationRoutes from './routes/notifications.js';
 import aiRoutes from './routes/ai.js';
+import multiAgentRoutes from './routes/multi-agent.js';
 
 // 加载环境变量
 dotenv.config();
@@ -28,7 +29,14 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? process.env.FRONTEND_URL || 'https://your-domain.com'
-    : ['http://localhost:5173', 'http://localhost:3000'],
+    : (origin, callback) => {
+        // Allow any localhost in development
+        if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
   credentials: true
 }));
 
@@ -51,6 +59,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/multi-agent', multiAgentRoutes);
 
 // 404处理
 app.use('/api/*', (req, res) => {

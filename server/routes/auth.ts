@@ -182,7 +182,7 @@ router.post('/login', async (req, res) => {
     // 获取/创建应用侧用户资料
     const { data: userProfile } = await supabaseAdmin
       .from('users')
-      .select('id, email, name, role, created_at, updated_at')
+      .select('id, email, name, avatar_url, role, created_at, updated_at')
       .eq('id', signInData.user.id)
       .single();
 
