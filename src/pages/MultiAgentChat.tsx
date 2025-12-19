@@ -1,14 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Layers, Loader2, MessageSquare, Plus, Trash2, Edit2, X, Check, PanelLeftClose, PanelLeft, FileText, Globe, Paperclip } from 'lucide-react';
+import { Send, User, Bot, Layers, Loader2, MessageSquare, Plus, Trash2, Edit2, X, Check, PanelLeftClose, PanelLeft, FileText, Globe, Paperclip, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import ConfirmationModal from '../components/ConfirmationModal';
 import { useAuthStore } from '../stores/auth';
 
 interface Message {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   agentName?: string;
   agentAvatar?: string;
+  files?: { name: string; content: string }[];
+  images?: string[];
+  created_at?: string;
 }
 
 interface Session {
@@ -23,12 +28,15 @@ const MultiAgentChat: React.FC = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   
   // File Upload & Web Search State
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [pendingFiles, setPendingFiles] = useState<{ name: string; content: string }[]>([]);
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // History State
@@ -38,18 +46,55 @@ const MultiAgentChat: React.FC = () => {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitleInput, setEditTitleInput] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const toggleFileExpand = (fileId: string) => {
+    setExpandedFiles(prev => ({
+      ...prev,
+      [fileId]: !prev[fileId]
+    }));
+  };
+
+  const handleCopyMessage = (content: string, messageId: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedMessageId(messageId);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
+  const handleScroll = () => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      setUserScrolledUp(!isAtBottom);
+    }
+  };
+
+  const scrollToBottom = (force = false) => {
+    if (force || !userScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
+    // 当消息数量增加时（新消息），强制滚动到底部
+    // 当消息内容更新时（流式输出），只有在用户没有向上滚动时才滚动
+    const isNewMessage = true; // 简化处理，实际上应该比较长度，但这里依赖 userScrolledUp 也可以
+    scrollToBottom(false);
   }, [messages]);
 
+  // Save session ID
+  useEffect(() => {
+    if (currentSessionId) {
+      localStorage.setItem('lastMultiAgentSessionId', currentSessionId);
+    }
+  }, [currentSessionId]);
+
   // Load Sessions
-  const fetchSessions = async () => {
-    setSessionsLoading(true);
+  const fetchSessions = async (isBackground = false) => {
+    if (!isBackground) {
+        setSessionsLoading(true);
+    }
     try {
       const res = await fetch('/api/multi-agent/sessions', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -57,6 +102,11 @@ const MultiAgentChat: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         setSessions(data.data);
+        // Restore session if exists
+        const lastSessionId = localStorage.getItem('lastMultiAgentSessionId');
+        if (lastSessionId && data.data.find((s: Session) => s.id === lastSessionId)) {
+          setCurrentSessionId(lastSessionId);
+        }
       }
     } catch (e) {
       console.error('Fetch sessions failed', e);
@@ -76,6 +126,12 @@ const MultiAgentChat: React.FC = () => {
       return;
     }
     
+    // 如果正在发送消息（isLoading为true），且是新会话（messages长度不为0，说明本地刚添加了用户消息），
+    // 则跳过从数据库加载，避免覆盖本地状态
+    if (isLoading && messages.length > 0) {
+        return;
+    }
+
     const loadMessages = async () => {
       try {
         const res = await fetch(`/api/multi-agent/sessions/${currentSessionId}/messages`, {
@@ -84,11 +140,20 @@ const MultiAgentChat: React.FC = () => {
         const data = await res.json();
         if (data.success) {
             const formatted: Message[] = data.data.map((m: any) => ({
+                id: m.id,
                 role: m.role,
                 content: m.content,
                 agentName: m.metadata?.agentName,
-                agentAvatar: m.metadata?.agentAvatar
+                agentAvatar: m.metadata?.agentAvatar,
+                images: m.images,
+                files: m.files
             }));
+            console.log('[MultiAgentChat] Loaded messages. Count:', formatted.length);
+            formatted.forEach(m => {
+                if (m.files && m.files.length > 0) {
+                    console.log(`Message ${m.id} has ${m.files.length} files`);
+                }
+            });
             setMessages(formatted);
         }
       } catch (e) {
@@ -159,9 +224,9 @@ const MultiAgentChat: React.FC = () => {
     setPendingFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const deleteSession = async (e: React.MouseEvent, id: string) => {
-      e.stopPropagation();
-      if (!confirm('确定要删除这个会话吗？')) return;
+  const confirmDeleteSession = async () => {
+      if (!deleteConfirmation) return;
+      const id = deleteConfirmation;
       try {
           await fetch(`/api/multi-agent/sessions/${id}`, {
               method: 'DELETE',
@@ -174,7 +239,14 @@ const MultiAgentChat: React.FC = () => {
           }
       } catch (e) {
           console.error('Delete failed', e);
+      } finally {
+          setDeleteConfirmation(null);
       }
+  };
+
+  const deleteSession = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setDeleteConfirmation(id);
   };
 
   const startEditSession = (e: React.MouseEvent, session: Session) => {
@@ -212,13 +284,20 @@ const MultiAgentChat: React.FC = () => {
         displayContent = pendingImages.length > 0 ? '发送了图片' : '发送了文件';
     }
 
-    const userMsg: Message = { role: 'user', content: displayContent };
+    const currentImages = [...pendingImages];
+    const currentFiles = [...pendingFiles];
+
+    const userMsg: Message = { 
+        role: 'user', 
+        content: displayContent,
+        images: currentImages,
+        files: currentFiles
+    };
     setMessages(prev => [...prev, userMsg]);
+    setUserScrolledUp(false);
     
     // 保存并清空待发送状态
     const currentInput = inputMessage;
-    const currentImages = [...pendingImages];
-    const currentFiles = [...pendingFiles];
     
     setInputMessage('');
     setPendingImages([]);
@@ -314,6 +393,13 @@ const MultiAgentChat: React.FC = () => {
       setMessages(prev => [...prev, { role: 'assistant', content: '抱歉，遇到了一些错误，请稍后再试。' }]);
     } finally {
       setIsLoading(false);
+      // 如果是第一条消息，延迟刷新会话列表以获取自动生成的标题
+       if (messages.length === 0) {
+           // 尝试多次刷新以确保获取到标题
+           setTimeout(() => fetchSessions(), 2000);
+           setTimeout(() => fetchSessions(), 5000);
+           setTimeout(() => fetchSessions(), 10000);
+       }
     }
   };
 
@@ -384,7 +470,16 @@ const MultiAgentChat: React.FC = () => {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-full transition-all duration-300 relative">
+      <div className="flex-1 flex flex-col h-full min-w-0 transition-all duration-300 relative">
+        <ConfirmationModal
+          isOpen={!!deleteConfirmation}
+          onClose={() => setDeleteConfirmation(null)}
+          onConfirm={confirmDeleteSession}
+          title="删除会话"
+          message="确定要删除这个会话吗？删除后将无法恢复。"
+          type="danger"
+          confirmText="删除"
+        />
         {/* Header */}
         <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-gray-100 flex items-center justify-between px-6 sticky top-0 z-10">
           <div className="flex items-center gap-3">
@@ -408,7 +503,11 @@ const MultiAgentChat: React.FC = () => {
         </header>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+        <div 
+          className="flex-1 overflow-y-auto p-6 scroll-smooth"
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+        >
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400">
               <div className="w-20 h-20 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
@@ -420,7 +519,7 @@ const MultiAgentChat: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-6">
+            <div className="w-[85%] max-w-[1600px] mx-auto space-y-6 px-4">
               {messages.map((msg, index) => {
                 // Hide empty assistant messages until content starts streaming
                 if (msg.role === 'assistant' && !msg.content) return null;
@@ -450,21 +549,121 @@ const MultiAgentChat: React.FC = () => {
                     )}
                   </div>
                   
-                  <div className={`flex flex-col max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} ${msg.role === 'assistant' ? 'w-full max-w-[calc(100%-3rem)]' : 'max-w-[80%]'}`}>
                     {msg.role === 'assistant' && msg.agentName && (
                       <div className="text-xs text-gray-500 mb-1 ml-1">
                         {msg.agentName === 'DEFAULT' ? '默认模型' : msg.agentName}
                       </div>
                     )}
-                    <div className={`px-4 py-3 rounded-2xl shadow-sm ${
+                    <div className={`px-4 py-3 rounded-2xl shadow-sm overflow-hidden ${
                       msg.role === 'user' 
                         ? 'bg-blue-600 text-white rounded-tr-none' 
-                        : 'bg-white text-gray-900 border border-gray-100 rounded-tl-none'
+                        : 'bg-white text-gray-900 border border-gray-100 rounded-tl-none w-full'
                     }`}>
+                      {/* Display Images if any */}
+                      {msg.images && msg.images.length > 0 && (
+                        <div className={`flex flex-wrap gap-2 mb-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          {msg.images.map((img, idx) => (
+                            <img 
+                              key={idx} 
+                              src={img} 
+                              alt="attachment" 
+                              className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(img, '_blank')}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Display Files if any */}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="flex flex-col gap-2 mb-2">
+                          {msg.files.map((file, idx) => {
+                             const fileId = `${msg.id || index}-file-${idx}`;
+                             const isExpanded = expandedFiles[fileId];
+                             return (
+                               <div key={idx} className={`rounded-xl border overflow-hidden shadow-sm transition-all duration-200 ${
+                                 msg.role === 'user' 
+                                   ? 'bg-blue-50/10 border-blue-200/30' 
+                                   : 'bg-blue-50 border-blue-100'
+                               }`}>
+                                  <div 
+                                    className={`flex items-center justify-between px-4 py-3 cursor-pointer ${
+                                      msg.role === 'user'
+                                        ? 'hover:bg-white/10'
+                                        : 'hover:bg-blue-100/50'
+                                    }`}
+                                    onClick={() => toggleFileExpand(fileId)}
+                                  >
+                                    <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
+                                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                        msg.role === 'user'
+                                          ? 'bg-white/20'
+                                          : 'bg-blue-100'
+                                      }`}>
+                                        <FileText className={`w-5 h-5 ${
+                                          msg.role === 'user' ? 'text-white' : 'text-blue-600'
+                                        }`} />
+                                      </div>
+                                      <div className="flex flex-col overflow-hidden min-w-0">
+                                        <span className={`text-sm font-semibold truncate ${
+                                          msg.role === 'user' ? 'text-white' : 'text-blue-900'
+                                        }`}>{file.name}</span>
+                                        <span className={`text-xs mt-0.5 ${
+                                          msg.role === 'user' ? 'text-blue-100/80' : 'text-blue-500'
+                                        }`}>已解析</span>
+                                      </div>
+                                    </div>
+                                    <button className={`p-1.5 rounded-full transition-colors ml-2 flex-shrink-0 ${
+                                      msg.role === 'user'
+                                        ? 'text-blue-100 hover:bg-white/20'
+                                        : 'text-blue-400 hover:bg-blue-100'
+                                    }`}>
+                                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                    </button>
+                                  </div>
+                                  
+                                  <AnimatePresence>
+                                    {isExpanded && (
+                                      <motion.div 
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className={`border-t ${
+                                          msg.role === 'user'
+                                            ? 'border-white/10 bg-black/10'
+                                            : 'border-blue-100 bg-white'
+                                        }`}
+                                      >
+                                        <div className={`p-4 text-xs font-mono whitespace-pre-wrap max-h-[300px] overflow-y-auto text-left ${
+                                          msg.role === 'user' ? 'text-blue-50' : 'text-gray-600'
+                                        }`}>
+                                          {file.content}
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                               </div>
+                             );
+                          })}
+                        </div>
+                      )}
+
                       {msg.role === 'user' ? (
                         <p className="whitespace-pre-wrap">{msg.content}</p>
                       ) : (
-                        <MarkdownRenderer content={msg.content} />
+                        <div className="relative group/msg">
+                             <div className="absolute -top-2 -right-2 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20">
+                                 <button
+                                     onClick={() => handleCopyMessage(msg.content, msg.id || `msg-${index}`)}
+                                     className="p-1.5 bg-white border border-gray-200 shadow-sm rounded-md hover:bg-gray-50 text-gray-500"
+                                     title="复制消息"
+                                 >
+                                     {copiedMessageId === (msg.id || `msg-${index}`) ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                 </button>
+                             </div>
+                             <MarkdownRenderer content={msg.content} />
+                         </div>
                       )}
                     </div>
                   </div>
@@ -507,7 +706,7 @@ const MultiAgentChat: React.FC = () => {
             )}
 
             <form onSubmit={handleSubmit} className="relative">
-              <div className="relative flex items-end gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-sm">
+              <div className="relative flex items-end gap-2 bg-white border border-gray-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-sm">
                  {/* Toolbar Buttons */}
                  <div className="flex items-center gap-1 pb-1 pl-1">
                      <button
@@ -541,7 +740,7 @@ const MultiAgentChat: React.FC = () => {
                     onChange={(e) => setInputMessage(e.target.value)}
                     placeholder="输入您的问题，我会自动匹配最合适的助手..."
                     className="flex-1 bg-transparent border-none focus:ring-0 py-3 min-w-0 text-gray-900 placeholder-gray-400"
-                    disabled={isLoading}
+                    disabled={false}
                  />
                  
                  <button

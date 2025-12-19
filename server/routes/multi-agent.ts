@@ -1,7 +1,7 @@
 import express from 'express';
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { routingGraph, getAgentSystemPrompt } from '../services/multiAgentGraph.js';
-import { createDashScopeModel, createStreamHandler } from '../services/langchain.js';
+import { createDashScopeModel, createStreamHandler, generateSessionTitle } from '../services/langchain.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 
@@ -148,24 +148,40 @@ router.post('/chat', authenticateToken, async (req, res) => {
        // 保存用户最新一条消息
        const lastMsg = messages[messages.length - 1];
        if (lastMsg.role === 'user') {
-           await supabaseAdmin.from('messages').insert({
-               session_id: sessionId,
-               user_id: userId,
-               role: 'user',
-               content: lastMsg.content,
-               images: images || [],
-               files: files || []
-           });
+           console.log(`[MultiAgent] Saving user message. Session: ${sessionId}, Files: ${files?.length}, Images: ${images?.length}`);
            
-           // 更新会话时间
-           await supabaseAdmin.from('sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
-           
-           // 如果是第一条消息，生成标题
-           const { data: session } = await supabaseAdmin.from('sessions').select('title').eq('id', sessionId).single();
-           if (session && session.title === '新对话') {
-               await supabaseAdmin.from('sessions').update({ 
-                   title: lastMsg.content.substring(0, 30) 
-               }).eq('id', sessionId);
+           try {
+               const { error: insertError } = await supabaseAdmin.from('messages').insert({
+                   session_id: sessionId,
+                   user_id: userId,
+                   role: 'user',
+                   content: lastMsg.content,
+                   images: images || [],
+                   files: files || []
+               });
+
+               if (insertError) {
+                   console.error('[MultiAgent] Failed to save user message:', insertError);
+                   // 如果是因为缺少 files 列，尝试降级保存（不存 files）
+                   if (insertError.code === '42703' && insertError.message?.includes('files')) {
+                       console.warn('[MultiAgent] Retrying without files column...');
+                       await supabaseAdmin.from('messages').insert({
+                           session_id: sessionId,
+                           user_id: userId,
+                           role: 'user',
+                           content: lastMsg.content,
+                           images: images || []
+                       });
+                   } else {
+                       throw insertError;
+                   }
+               } else {
+                   // 更新会话时间
+                   await supabaseAdmin.from('sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
+               }
+           } catch (e) {
+               console.error('[MultiAgent] Error saving message to DB:', e);
+               // 不阻断流程，继续对话
            }
        }
     }
@@ -284,6 +300,20 @@ router.post('/chat', authenticateToken, async (req, res) => {
                            console.error('Failed to save AI response (retry):', retryError);
                       }
                   }
+              }
+
+              // Auto-generate title if it's the first message
+              if (messages.length === 1) {
+                  console.log('Auto-generating title for session:', sessionId);
+                  generateSessionTitle(lastContent, fullResponse).then(async (newTitle) => {
+                      console.log('Generated title:', newTitle);
+                      if (newTitle && newTitle !== '新的对话') {
+                          await supabaseAdmin
+                              .from('sessions')
+                              .update({ title: newTitle })
+                              .eq('id', sessionId);
+                      }
+                  }).catch(err => console.error('Failed to auto-generate title:', err));
               }
           }
       } // Resolve callback
