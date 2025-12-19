@@ -89,6 +89,17 @@
 - `agent_id`: UUID (FK -> agents.id, PK)
 - `created_at`: TIMESTAMPTZ
 
+#### `memories` (记忆表)
+存储用户的长期记忆信息。
+- `id`: UUID (PK)
+- `user_id`: UUID (FK -> users.id)
+- `content`: TEXT - 记忆内容
+- `category`: TEXT - 分类 (e.g., `'preference'`, `'fact'`)
+- `source`: TEXT - 来源 (e.g., `'chat'`, `'manual'`)
+- `is_active`: BOOLEAN - 是否有效
+- `created_at`: TIMESTAMPTZ
+- `updated_at`: TIMESTAMPTZ
+
 ---
 
 ## 2. 数据库函数 (RPC)
@@ -119,6 +130,7 @@
 *   **Agent Revisions**: 用户管理自己的修订；管理员审核所有。
 *   **Notifications**: 用户管理自己的通知。
 *   **Favorites**: 用户管理自己的收藏。
+*   **Memories**: 用户管理自己的记忆数据。
 
 ### 存储桶访问策略 (Storage)
 Bucket: `agent-avatars` / `user-avatars`
@@ -151,6 +163,7 @@ Bucket: `agent-avatars` / `user-avatars`
 17. `20251214_fix_hybrid_search_rpc.sql`: **修复混合检索 RPC** (修正参数类型匹配问题)。
 18. `20251217_fix_view_security.sql`: **修复视图安全警告** (将收藏计数逻辑下沉至 `get_agent_favorites_count` 函数，视图改为 Security Invoker)。
 19. `20251217_add_metadata_to_messages.sql`: **消息元数据扩展** (messages 表添加 metadata 字段，sessions 表 agent_id 允许为空以支持综合对话)。
+20. `20251219_add_memories_table.sql`: **添加记忆表** (创建 memories 表并启用 RLS)。
 
 ---
 

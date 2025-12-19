@@ -1,6 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Send, User, Bot, Layers, Loader2, MessageSquare, Plus, Trash2, Edit2, X, Check, PanelLeftClose, PanelLeft, FileText, Globe, Paperclip, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Lottie from 'lottie-react';
+import robotAnimation from '../assets/animations/Little power robot.json';
+import PixelAgents from '../components/PixelAgents';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { useAuthStore } from '../stores/auth';
@@ -27,8 +30,10 @@ const MultiAgentChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   // File Upload & Web Search State
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
@@ -48,6 +53,33 @@ const MultiAgentChat: React.FC = () => {
   const [editTitleInput, setEditTitleInput] = useState('');
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hour = pad(date.getHours());
+    const minute = pad(date.getMinutes());
+    
+    const isToday = date.toDateString() === now.toDateString();
+    const isThisYear = year === now.getFullYear();
+    
+    if (isToday) {
+      return `${hour}:${minute}`;
+    }
+    
+    if (isThisYear) {
+      return `${month}.${day} ${hour}:${minute}`;
+    }
+    
+    return `${year}.${month}.${day} ${hour}:${minute}`;
+  };
 
   const toggleFileExpand = (fileId: string) => {
     setExpandedFiles(prev => ({
@@ -70,18 +102,26 @@ const MultiAgentChat: React.FC = () => {
     }
   };
 
-  const scrollToBottom = (force = false) => {
-    if (force || !userScrolledUp) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (!userScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior });
     }
   };
 
   useEffect(() => {
-    // 当消息数量增加时（新消息），强制滚动到底部
     // 当消息内容更新时（流式输出），只有在用户没有向上滚动时才滚动
-    const isNewMessage = true; // 简化处理，实际上应该比较长度，但这里依赖 userScrolledUp 也可以
-    scrollToBottom(false);
-  }, [messages]);
+    // 如果正在加载(发送消息/流式传输)，使用平滑滚动；
+    if (isLoading) {
+       scrollToBottom('smooth');
+    }
+  }, [messages, isLoading]);
+
+  // 使用 useLayoutEffect 确保在浏览器绘制前瞬间滚动到底部，避免从上到下的动画
+  useLayoutEffect(() => {
+     if (!isLoading && messages.length > 0) {
+         scrollToBottom('auto');
+     }
+  }, [messages, isLoading]);
 
   // Save session ID
   useEffect(() => {
@@ -92,9 +132,20 @@ const MultiAgentChat: React.FC = () => {
 
   // Load Sessions
   const fetchSessions = async (isBackground = false) => {
-    if (!isBackground) {
+    // 优先从缓存加载
+    const cachedSessions = localStorage.getItem('cachedMultiAgentSessions');
+    if (!isBackground && cachedSessions) {
+        try {
+            setSessions(JSON.parse(cachedSessions));
+        } catch (e) {
+            console.error('Failed to parse cached sessions', e);
+        }
+    }
+
+    if (!isBackground && !cachedSessions) {
         setSessionsLoading(true);
     }
+    
     try {
       const res = await fetch('/api/multi-agent/sessions', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -102,6 +153,8 @@ const MultiAgentChat: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         setSessions(data.data);
+        localStorage.setItem('cachedMultiAgentSessions', JSON.stringify(data.data));
+        
         // Restore session if exists
         const lastSessionId = localStorage.getItem('lastMultiAgentSessionId');
         if (lastSessionId && data.data.find((s: Session) => s.id === lastSessionId)) {
@@ -120,22 +173,44 @@ const MultiAgentChat: React.FC = () => {
   }, []);
 
   // Load Messages for Session
-  useEffect(() => {
-    if (!currentSessionId) {
-      setMessages([]);
-      return;
-    }
-    
-    // 如果正在发送消息（isLoading为true），且是新会话（messages长度不为0，说明本地刚添加了用户消息），
-    // 则跳过从数据库加载，避免覆盖本地状态
-    if (isLoading && messages.length > 0) {
-        return;
-    }
+  const loadSessionMessages = async (sessionId: string) => {
+      // Cancel previous request
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
 
-    const loadMessages = async () => {
+      // 1. 尝试从缓存同步加载
+      const cacheKey = `multi_agent_messages_${sessionId}`;
+      const cachedMessages = localStorage.getItem(cacheKey);
+      
+      let initialMessages: Message[] = [];
+      let hasCache = false;
+
+      if (cachedMessages) {
+          try {
+              initialMessages = JSON.parse(cachedMessages);
+              hasCache = true;
+              console.log('[MultiAgentChat] Loaded messages from cache synchronously');
+          } catch (e) {
+              console.error('Failed to parse cached messages', e);
+          }
+      }
+
+      // 2. 立即更新状态
+      setMessages(initialMessages);
+      setCurrentSessionId(sessionId);
+      
+      if (!hasCache) {
+          setHistoryLoading(true);
+      }
+
+      // 3. 后台获取最新数据
       try {
-        const res = await fetch(`/api/multi-agent/sessions/${currentSessionId}/messages`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        const res = await fetch(`/api/multi-agent/sessions/${sessionId}/messages`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            signal
         });
         const data = await res.json();
         if (data.success) {
@@ -146,22 +221,40 @@ const MultiAgentChat: React.FC = () => {
                 agentName: m.metadata?.agentName,
                 agentAvatar: m.metadata?.agentAvatar,
                 images: m.images,
-                files: m.files
+                files: m.files,
+                created_at: m.created_at
             }));
-            console.log('[MultiAgentChat] Loaded messages. Count:', formatted.length);
-            formatted.forEach(m => {
-                if (m.files && m.files.length > 0) {
-                    console.log(`Message ${m.id} has ${m.files.length} files`);
-                }
-            });
+            
+            // 只有当数据真的变化了，或者当前没有缓存时才更新
+            // 这里简单全量更新以保持一致性
             setMessages(formatted);
+            localStorage.setItem(cacheKey, JSON.stringify(formatted));
         }
-      } catch (e) {
+      } catch (e: any) {
+          if (e.name === 'AbortError') return;
           console.error('Load messages failed', e);
+      } finally {
+          if (!signal.aborted) {
+              setHistoryLoading(false);
+          }
       }
-    };
-    loadMessages();
-  }, [currentSessionId]);
+  };
+
+  useEffect(() => {
+    // 只有在组件初始化且没有 currentSessionId 时才运行，或者从外部跳转进来时
+    // 这里主要处理初始化加载，点击切换逻辑移到 handleSessionClick
+    if (!currentSessionId && sessions.length > 0) {
+        // 尝试恢复上次会话
+        const lastSessionId = localStorage.getItem('lastMultiAgentSessionId');
+        const targetId = lastSessionId && sessions.find(s => s.id === lastSessionId) ? lastSessionId : sessions[0].id;
+        loadSessionMessages(targetId);
+    }
+  }, [sessions]); // 依赖 sessions 加载完成
+
+  const handleSessionClick = (sessionId: string) => {
+      if (sessionId === currentSessionId) return;
+      loadSessionMessages(sessionId);
+  };
 
   const createNewSession = () => {
       setCurrentSessionId(null);
@@ -232,7 +325,11 @@ const MultiAgentChat: React.FC = () => {
               method: 'DELETE',
               headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
           });
-          setSessions(prev => prev.filter(s => s.id !== id));
+          setSessions(prev => {
+              const newSessions = prev.filter(s => s.id !== id);
+              localStorage.setItem('cachedMultiAgentSessions', JSON.stringify(newSessions));
+              return newSessions;
+          });
           if (currentSessionId === id) {
               setCurrentSessionId(null);
               setMessages([]);
@@ -267,7 +364,11 @@ const MultiAgentChat: React.FC = () => {
               },
               body: JSON.stringify({ title: editTitleInput })
           });
-          setSessions(prev => prev.map(s => s.id === editingSessionId ? { ...s, title: editTitleInput } : s));
+          setSessions(prev => {
+              const newSessions = prev.map(s => s.id === editingSessionId ? { ...s, title: editTitleInput } : s);
+              localStorage.setItem('cachedMultiAgentSessions', JSON.stringify(newSessions));
+              return newSessions;
+          });
           setEditingSessionId(null);
       } catch (e) {
           console.error('Update title failed', e);
@@ -291,9 +392,17 @@ const MultiAgentChat: React.FC = () => {
         role: 'user', 
         content: displayContent,
         images: currentImages,
-        files: currentFiles
+        files: currentFiles,
+        created_at: new Date().toISOString()
     };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => {
+        const newMessages = [...prev, userMsg];
+        // 更新缓存
+        if (activeSessionId) {
+            localStorage.setItem(`multi_agent_messages_${activeSessionId}`, JSON.stringify(newMessages));
+        }
+        return newMessages;
+    });
     setUserScrolledUp(false);
     
     // 保存并清空待发送状态
@@ -320,8 +429,12 @@ const MultiAgentChat: React.FC = () => {
             const createData = await createRes.json();
             if (createData.success) {
                 activeSessionId = createData.data.id;
-                setCurrentSessionId(activeSessionId);
-                setSessions(prev => [createData.data, ...prev]);
+                setCurrentSessionId(activeSessionId); // 这里需要保留，因为是新建会话
+                setSessions(prev => {
+                    const newSessions = [createData.data, ...prev];
+                    localStorage.setItem('cachedMultiAgentSessions', JSON.stringify(newSessions));
+                    return newSessions;
+                });
             }
         } catch (e) {
             console.error('Create session failed', e);
@@ -348,7 +461,7 @@ const MultiAgentChat: React.FC = () => {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg: Message = { role: 'assistant', content: '' };
+      let assistantMsg: Message = { role: 'assistant', content: '', created_at: new Date().toISOString() };
       
       setMessages(prev => [...prev, assistantMsg]);
 
@@ -372,6 +485,10 @@ const MultiAgentChat: React.FC = () => {
                 setMessages(prev => {
                   const newMessages = [...prev];
                   newMessages[newMessages.length - 1] = { ...assistantMsg };
+                  // Update cache
+                  if (activeSessionId) {
+                      localStorage.setItem(`multi_agent_messages_${activeSessionId}`, JSON.stringify(newMessages));
+                  }
                   return newMessages;
                 });
               } else if (data.token) {
@@ -379,6 +496,10 @@ const MultiAgentChat: React.FC = () => {
                 setMessages(prev => {
                   const newMessages = [...prev];
                   newMessages[newMessages.length - 1] = { ...assistantMsg };
+                  // Update cache
+                  if (activeSessionId) {
+                      localStorage.setItem(`multi_agent_messages_${activeSessionId}`, JSON.stringify(newMessages));
+                  }
                   return newMessages;
                 });
               }
@@ -422,7 +543,7 @@ const MultiAgentChat: React.FC = () => {
             </div>
             
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {sessionsLoading ? (
+                {sessionsLoading && sessions.length === 0 ? (
                     <div className="flex justify-center py-4"><Loader2 className="animate-spin w-5 h-5 text-gray-400"/></div>
                 ) : sessions.length === 0 ? (
                     <div className="text-center text-gray-400 py-8 text-sm">暂无历史会话</div>
@@ -430,7 +551,7 @@ const MultiAgentChat: React.FC = () => {
                     sessions.map(session => (
                         <div
                             key={session.id}
-                            onClick={() => setCurrentSessionId(session.id)}
+                            onClick={() => handleSessionClick(session.id)}
                             className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
                                 currentSessionId === session.id 
                                     ? 'bg-indigo-50 text-indigo-700 shadow-sm' 
@@ -489,8 +610,8 @@ const MultiAgentChat: React.FC = () => {
             >
               {sidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeft className="w-5 h-5" />}
             </button>
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-sm">
-              <Layers className="w-5 h-5" />
+            <div className="w-12 h-12 flex items-center justify-center">
+              <Lottie animationData={robotAnimation} loop={true} className="w-full h-full" />
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900">综合对话平台</h1>
@@ -509,6 +630,11 @@ const MultiAgentChat: React.FC = () => {
           onScroll={handleScroll}
         >
           {messages.length === 0 ? (
+            historyLoading ? (
+               <div className="h-full flex items-center justify-center">
+                   <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+               </div>
+            ) : (
             <div className="h-full flex flex-col items-center justify-center text-gray-400">
               <div className="w-20 h-20 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
                 <Layers className="w-10 h-10 text-indigo-500" />
@@ -518,6 +644,7 @@ const MultiAgentChat: React.FC = () => {
                 我会自动分析您的需求，并调度最合适的智能体为您服务。
               </p>
             </div>
+            )
           ) : (
             <div className="w-[85%] max-w-[1600px] mx-auto space-y-6 px-4">
               {messages.map((msg, index) => {
@@ -551,8 +678,11 @@ const MultiAgentChat: React.FC = () => {
                   
                   <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} ${msg.role === 'assistant' ? 'w-full max-w-[calc(100%-3rem)]' : 'max-w-[80%]'}`}>
                     {msg.role === 'assistant' && msg.agentName && (
-                      <div className="text-xs text-gray-500 mb-1 ml-1">
-                        {msg.agentName === 'DEFAULT' ? '默认模型' : msg.agentName}
+                      <div className="text-xs text-gray-500 mb-1 ml-1 flex items-center gap-2">
+                        <span>{msg.agentName === 'DEFAULT' ? '默认模型' : msg.agentName}</span>
+                        {msg.created_at && (
+                          <span className="text-gray-300 text-[10px]">{formatTime(msg.created_at)}</span>
+                        )}
                       </div>
                     )}
                     <div className={`px-4 py-3 rounded-2xl shadow-sm overflow-hidden ${
@@ -666,6 +796,12 @@ const MultiAgentChat: React.FC = () => {
                          </div>
                       )}
                     </div>
+                    {/* User message timestamp */}
+                    {msg.role === 'user' && msg.created_at && (
+                      <div className="text-xs text-gray-400 mt-1 mr-1 font-medium">
+                        {formatTime(msg.created_at)}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )})}
@@ -685,46 +821,54 @@ const MultiAgentChat: React.FC = () => {
         </div>
 
         {/* Input Area */}
-        <div className="p-6 bg-white border-t border-gray-100">
-          <div className="max-w-3xl mx-auto">
+        <div className="p-6 bg-transparent relative z-20">
+          <div className="max-w-3xl mx-auto relative">
              {/* Pending Files Area */}
             {(pendingImages.length > 0 || pendingFiles.length > 0) && (
-              <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
+              <div className="flex gap-2 mb-4 overflow-x-auto pb-2 px-2">
                 {pendingImages.map((img, i) => (
-                  <div key={i} className="relative w-16 h-16 flex-shrink-0">
-                     <img src={img} className="w-full h-full object-cover rounded-lg border border-gray-200" alt="uploaded" />
-                     <button onClick={() => removePendingImage(i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600"><X className="w-3 h-3"/></button>
+                  <div key={i} className="relative w-16 h-16 flex-shrink-0 shadow-sm rounded-lg">
+                     <img src={img} className="w-full h-full object-cover rounded-lg border border-white" alt="uploaded" />
+                     <button onClick={() => removePendingImage(i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 shadow-sm transition-transform hover:scale-110"><X className="w-3 h-3"/></button>
                   </div>
                 ))}
                 {pendingFiles.map((file, i) => (
-                  <div key={i} className="relative w-32 h-16 flex-shrink-0 bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-center group">
-                     <div className="flex items-center gap-1 mb-1 overflow-hidden"><FileText className="w-4 h-4 text-gray-500 flex-shrink-0"/> <span className="text-xs truncate text-gray-700">{file.name}</span></div>
-                     <button onClick={() => removePendingFile(i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600"><X className="w-3 h-3"/></button>
+                  <div key={i} className="relative w-32 h-16 flex-shrink-0 bg-white border border-gray-100 shadow-sm rounded-lg p-2 flex flex-col justify-center group">
+                     <div className="flex items-center gap-1 mb-1 overflow-hidden"><FileText className="w-4 h-4 text-blue-500 flex-shrink-0"/> <span className="text-xs truncate text-gray-700">{file.name}</span></div>
+                     <button onClick={() => removePendingFile(i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 shadow-sm transition-transform hover:scale-110"><X className="w-3 h-3"/></button>
                   </div>
                 ))}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="relative">
-              <div className="relative flex items-end gap-2 bg-white border border-gray-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-sm">
+            {/* Pixel Agents Decoration */}
+            <div className="absolute -top-[52px] left-6 z-0 pointer-events-none">
+              <PixelAgents />
+            </div>
+
+            <form onSubmit={handleSubmit} className="relative z-10">
+              <div className="relative flex items-center gap-2 bg-white shadow-[0_8px_40px_-12px_rgba(0,0,0,0.1)] rounded-[2rem] p-2 pr-2 pl-4 border border-gray-100 hover:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.15)] transition-all duration-300">
                  {/* Toolbar Buttons */}
-                 <div className="flex items-center gap-1 pb-1 pl-1">
-                     <button
-                       type="button"
-                       onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                       className={`p-2 rounded-lg transition-colors ${isWebSearchEnabled ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:bg-gray-200'}`}
-                       title={isWebSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
-                     >
-                        <Globe className="w-5 h-5" />
-                     </button>
-                     
+                 <div className="flex items-center gap-2 pr-2 border-r border-gray-100">
                      <button
                        type="button"
                        onClick={() => fileInputRef.current?.click()}
-                       className="p-2 text-gray-400 hover:bg-gray-200 rounded-lg transition-colors"
+                       className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all duration-200"
                        title="上传文件/图片"
                      >
                         <Paperclip className="w-5 h-5" />
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                       className={`p-2 rounded-full transition-all duration-200 ${
+                         isWebSearchEnabled 
+                           ? 'bg-blue-100 text-blue-600' 
+                           : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+                       }`}
+                       title={isWebSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
+                     >
+                        <Globe className="w-5 h-5" />
                      </button>
                      <input 
                        type="file" 
@@ -738,17 +882,23 @@ const MultiAgentChat: React.FC = () => {
                     type="text"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    placeholder="输入您的问题，我会自动匹配最合适的助手..."
-                    className="flex-1 bg-transparent border-none focus:ring-0 py-3 min-w-0 text-gray-900 placeholder-gray-400"
+                    placeholder="和 Agent 一起开始你的工作..."
+                    className="flex-1 bg-transparent border-none focus:ring-0 py-3.5 px-2 min-w-0 text-gray-700 placeholder-gray-400 text-base"
                     disabled={false}
                  />
                  
                  <button
                     type="submit"
                     disabled={(!inputMessage.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || isLoading}
-                    className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm mb-1"
+                    className={`
+                      w-10 h-10 flex items-center justify-center rounded-full flex-shrink-0 transition-all duration-200
+                      ${(!inputMessage.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || isLoading
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-gray-700 to-gray-900 text-white hover:shadow-lg hover:scale-105 active:scale-95'
+                      }
+                    `}
                  >
-                    {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                    {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-0.5" />}
                  </button>
               </div>
             </form>

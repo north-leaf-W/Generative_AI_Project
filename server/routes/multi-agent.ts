@@ -2,6 +2,7 @@ import express from 'express';
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { routingGraph, getAgentSystemPrompt } from '../services/multiAgentGraph.js';
 import { createDashScopeModel, createStreamHandler, generateSessionTitle } from '../services/langchain.js';
+import { extractMemoryFromConversation } from '../services/memory.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 
@@ -300,6 +301,11 @@ router.post('/chat', authenticateToken, async (req, res) => {
                            console.error('Failed to save AI response (retry):', retryError);
                       }
                   }
+              }
+              
+              // 异步提取记忆
+              if (fullResponse && fullResponse.trim()) {
+                  extractMemoryFromConversation(userId, lastContent, fullResponse.trim(), 'multi-agent');
               }
 
               // Auto-generate title if it's the first message

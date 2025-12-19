@@ -15,6 +15,7 @@ import chatRoutes from './routes/chat.js';
 import notificationRoutes from './routes/notifications.js';
 import aiRoutes from './routes/ai.js';
 import multiAgentRoutes from './routes/multi-agent.js';
+import memoryRoutes from './routes/memories.js';
 
 // 加载环境变量
 dotenv.config();
@@ -60,6 +61,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/multi-agent', multiAgentRoutes);
+app.use('/api/memories', memoryRoutes);
 
 // 404处理
 app.use('/api/*', (req, res) => {

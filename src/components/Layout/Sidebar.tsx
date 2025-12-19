@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Globe, Bot, Bell, User, LogOut, ShieldCheck, Layers } from 'lucide-react';
+import { LayoutDashboard, Globe, Bot, Bell, User, LogOut, ShieldCheck, Layers, Brain } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth';
 import { useNotificationsStore } from '../../stores/notifications';
 
@@ -30,6 +30,7 @@ const Sidebar: React.FC = () => {
 
   if (user) {
     menuItems.push({ icon: Bot, label: '我的智能体', path: '/agents/my' });
+    menuItems.push({ icon: Brain, label: '记忆中心', path: '/memory-center' });
     menuItems.push({ icon: Bell, label: '消息中心', path: '/messages', badge: unreadCount });
     menuItems.push({ icon: User, label: '个人中心', path: '/profile' });
     

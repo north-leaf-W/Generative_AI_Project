@@ -19,6 +19,7 @@ interface ChatState {
   fetchMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, message: string, agentId: string, onToken: (token: string) => void, webSearch?: boolean, enableRAG?: boolean, images?: string[], files?: { name: string; content: string }[]) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  setSessions: (sessions: Session[]) => void;
   setCurrentSession: (session: Session | null) => void;
   clearChat: () => void;
   clearError: () => void;
@@ -49,6 +50,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchSessions: async (agentId?: string, mode?: 'public' | 'dev') => {
+    const cacheKey = `chat_sessions_${agentId || 'my'}_${mode || 'public'}`;
+    const cached = localStorage.getItem(cacheKey);
+    
+    if (cached) {
+      try {
+        set({ sessions: JSON.parse(cached), error: null });
+      } catch (e) {
+        console.error('Failed to parse cached sessions', e);
+      }
+    }
+
     set({ isLoading: true, error: null });
     
     try {
@@ -70,6 +82,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isLoading: false,
           error: null
         });
+        localStorage.setItem(cacheKey, JSON.stringify(response.data));
       } else {
         throw new Error(response.error || 'Failed to fetch sessions');
       }
@@ -162,7 +175,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return; 
     }
 
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, messages: [] });
     
     try {
       const response = await apiRequest<ApiResponse<Message[]>>(
@@ -171,12 +184,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
 
       if (response.success && response.data) {
-        set(state => ({ 
-          messages: response.data,
-          messageCache: { ...state.messageCache, [sessionId]: response.data }, // 更新缓存
-          isLoading: false,
-          error: null
-        }));
+        set(state => {
+          // 仅当当前会话ID匹配时才更新消息和加载状态
+          if (state.currentSession?.id === sessionId) {
+            return { 
+              messages: response.data,
+              messageCache: { ...state.messageCache, [sessionId]: response.data }, // 更新缓存
+              isLoading: false,
+              error: null
+            };
+          } else {
+             // 否则只更新缓存
+             return {
+                messageCache: { ...state.messageCache, [sessionId]: response.data }
+             };
+          }
+        });
       } else {
         throw new Error(response.error || 'Failed to fetch messages');
       }
@@ -369,6 +392,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         error: errorMessage 
       });
     }
+  },
+
+  setSessions: (sessions: Session[]) => {
+    set({ sessions });
   },
 
   setCurrentSession: (session: Session | null) => {

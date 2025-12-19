@@ -14,6 +14,7 @@ import EditAgent from "./pages/EditAgent";
 import MyAgents from "./pages/MyAgents";
 import AdminAgents from "./pages/AdminAgents";
 import MultiAgentChat from "./pages/MultiAgentChat";
+import MemoryCenter from "./pages/MemoryCenter";
 import Layout from "@/components/Layout/Layout";
 import VerifyEmail from "./pages/VerifyEmail";
 import { useAuthStore } from "./stores/auth";
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="/agents/edit/:id" element={<EditAgent />} />
           <Route path="/agents/my" element={<MyAgents />} />
           <Route path="/multi-agent" element={<MultiAgentChat />} />
+          <Route path="/memory-center" element={<MemoryCenter />} />
           <Route path="/admin/agents" element={<AdminAgents />} />
           <Route path="/other" element={<div className="text-center text-xl">Other Page - Coming Soon</div>} />
         </Route>

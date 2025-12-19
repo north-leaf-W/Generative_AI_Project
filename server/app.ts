@@ -18,6 +18,7 @@ import chatRoutes from './routes/chat.js'
 import notificationRoutes from './routes/notifications.js'
 import aiRoutes from './routes/ai.js'
 import multiAgentRoutes from './routes/multi-agent.js'
+import memoryRoutes from './routes/memories.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -42,6 +43,7 @@ app.use('/api/chat', chatRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/multi-agent', multiAgentRoutes)
+app.use('/api/memories', memoryRoutes)
 
 /**
  * health

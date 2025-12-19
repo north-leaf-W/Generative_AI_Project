@@ -6,6 +6,7 @@ import os from 'os';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { generateAIResponse, generateSessionTitle } from '../services/langchain.js';
+import { extractMemoryFromConversation } from '../services/memory.js';
 import { extractTextFromFile } from '../utils/document-parser.js';
 import { ApiResponse, ChatRequest, Message } from '../../shared/types.js';
 
@@ -173,6 +174,11 @@ router.post('/stream', authenticateToken, async (req, res) => {
         .from('sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', sessionId);
+
+      // 异步提取记忆
+      if (aiResponse && aiResponse.trim()) {
+        extractMemoryFromConversation(userId, message, aiResponse.trim(), 'chat');
+      }
 
       // 检查是否需要生成标题（仅当历史消息为空时，即这是第一轮对话）
       if (messageHistory.length === 0) {

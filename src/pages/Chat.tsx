@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Send, Menu, Plus, Trash2, User, Bot, Loader2, ArrowLeft, ChevronsLeft, X, AlertCircle, Star, Globe, Edit2, Check, Database, Paperclip, Image as ImageIcon, XCircle, FileText, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
@@ -33,6 +33,7 @@ const Chat: React.FC = () => {
     updateSession,
     deleteSession, 
     setCurrentSession,
+    setSessions,
     clearChat,
     reset
   } = useChatStore();
@@ -101,10 +102,18 @@ const Chat: React.FC = () => {
 
   // 仅当用户未向上滚动时，才自动滚动到底部 (用于流式输出时)
   useEffect(() => {
-    if (!userScrolledUp) {
-      scrollToBottom();
+    if (!userScrolledUp && isStreaming) {
+      scrollToBottom('smooth');
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, isStreaming]);
+
+  // 使用 useLayoutEffect 确保在浏览器绘制前瞬间滚动到底部，避免从上到下的动画
+  useLayoutEffect(() => {
+     // 只有当不是流式传输且有消息时才强制瞬间滚动 (通常是切换会话或初始加载)
+     if (!isStreaming && messages.length > 0) {
+         scrollToBottom('auto');
+     }
+  }, [messages, isStreaming]);
 
   // 初始化聊天或发送新消息时，强制滚动到底部
   useEffect(() => {
@@ -124,9 +133,31 @@ const Chat: React.FC = () => {
     const initChat = async () => {
       clearChat();
       setPendingNew(false);
-      setSessionsLoading(true);
+      
+      const cacheKey = `cachedSessions_${agentId}_${mode}`;
+      const cachedSessions = localStorage.getItem(cacheKey);
+      
+      if (cachedSessions) {
+          try {
+              setSessions(JSON.parse(cachedSessions));
+          } catch (e) {
+              console.error('Failed to parse cached sessions', e);
+          }
+      }
+      
+      if (!cachedSessions) {
+          setSessionsLoading(true);
+      }
+      
       // 获取该智能体的会话列表
       await fetchSessions(agentId, mode);
+      
+      // 更新缓存
+      const currentSessions = useChatStore.getState().sessions;
+      if (currentSessions.length > 0 || !cachedSessions) {
+           localStorage.setItem(cacheKey, JSON.stringify(currentSessions));
+      }
+      
       setSessionsLoading(false);
     };
 
@@ -171,6 +202,39 @@ const Chat: React.FC = () => {
     }
   }, [currentSession?.id]); // 仅当 session ID 变化时触发
 
+  const handleSessionClick = (session: Session) => {
+      setPendingNew(false);
+      
+      // 1. 同步尝试从缓存加载消息
+      const cacheKey = `messages_${session.id}`; // 注意：useChatStore 内部可能没有使用 localStorage 缓存消息，而是使用 messageCache
+      // 但为了解决闪烁，我们这里可以检查 useChatStore 的 messageCache
+      const cachedMessages = useChatStore.getState().messageCache[session.id];
+      
+      if (cachedMessages) {
+          // 如果 store 中已有缓存，直接切换 session 且不清除 messages
+          // 修改 store 以支持同步切换：setCurrentSession 会导致 messages 变空吗？
+          // 查看 store 代码：fetchMessages 会先检查缓存
+          // 为了确保原子性，我们最好手动调用 store 的方法
+          
+          // 优化：我们手动设置当前 session 和 messages，避免中间状态
+          useChatStore.setState({ 
+              currentSession: session,
+              messages: cachedMessages,
+              error: null
+          });
+      } else {
+          // 如果没有缓存，只能先切 session，store 会自动 fetchMessages (通过 useEffect 监听 currentSession)
+          // 或者手动触发 fetchMessages
+          setCurrentSession(session);
+          fetchMessages(session.id);
+      }
+      
+      // 移动端点击后自动关闭侧边栏
+      if (window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
+  };
+
   const handleCreateSession = async () => {
     if (!agentId) return;
     
@@ -178,6 +242,10 @@ const Chat: React.FC = () => {
     if (newSession) {
       setCurrentSession(newSession);
       fetchMessages(newSession.id);
+      
+      // Update Cache
+      const currentSessions = useChatStore.getState().sessions;
+      localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
     }
   };
 
@@ -243,6 +311,10 @@ const Chat: React.FC = () => {
       const newSession = await createSession(agentId, `新的对话`, mode);
       if (!newSession) return;
       setCurrentSession(newSession);
+      // Update Cache
+      const currentSessions = useChatStore.getState().sessions;
+      localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
+
       // 新建会话后不需要立即 fetchMessages，因为 sendMessage 会更新本地消息状态
       // setPendingNew(false); // 保持 pendingNew 为 true，防止 useEffect 触发 fetchMessages 覆盖本地状态
       targetSessionId = newSession.id;
@@ -301,12 +373,18 @@ const Chat: React.FC = () => {
       // 延迟一点时间，给后端生成标题留出余地
       if (targetSessionId === currentSession?.id && messages.length === 0) {
         setTimeout(() => {
-          fetchSessions(agentId, mode);
+          fetchSessions(agentId, mode).then(() => {
+             const currentSessions = useChatStore.getState().sessions;
+             localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
+          });
         }, 2000);
       } else if (targetSessionId && messages.length === 0) {
          // 新建会话的情况
          setTimeout(() => {
-          fetchSessions(agentId, mode);
+          fetchSessions(agentId, mode).then(() => {
+             const currentSessions = useChatStore.getState().sessions;
+             localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
+          });
         }, 2000);
       }
     } catch (error) {
@@ -336,6 +414,12 @@ const Chat: React.FC = () => {
     if (deleteConfirmation) {
       await deleteSession(deleteConfirmation);
       setDeleteConfirmation(null);
+      
+      // Update Cache
+      if (agentId) {
+          const currentSessions = useChatStore.getState().sessions;
+          localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
+      }
     }
   };
 
@@ -350,6 +434,12 @@ const Chat: React.FC = () => {
     if (editingSessionId && editTitleInput.trim()) {
       await updateSession(editingSessionId, { title: editTitleInput.trim() });
       setEditingSessionId(null);
+      
+      // Update Cache
+      if (agentId) {
+          const currentSessions = useChatStore.getState().sessions;
+          localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
+      }
     }
   };
 
@@ -484,15 +574,7 @@ const Chat: React.FC = () => {
                         ? 'bg-blue-50/80 border border-blue-200/50 shadow-sm'
                         : 'hover:bg-gray-50/50'
                     }`}
-                    onClick={() => {
-                      setPendingNew(false);
-                      setCurrentSession(session);
-                      fetchMessages(session.id);
-                      // 移动端点击后自动关闭侧边栏
-                      if (window.innerWidth < 768) {
-                        setSidebarOpen(false);
-                      }
-                    }}
+                    onClick={() => handleSessionClick(session)}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0 mr-2">

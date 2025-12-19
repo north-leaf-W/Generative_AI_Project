@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, Sparkles, Users, Zap, Search, FileText, Database, Code, Cpu, Layers } from 'lucide-react';
+import { MessageSquare, Sparkles, Users, Zap, Search, FileText, Database, Code, Cpu, Layers, Brain, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AgentCard from '../components/AgentCard';
 import Loading from '../components/Loading';
@@ -222,6 +222,69 @@ const Home: React.FC = () => {
               </div>
             </>
           )}
+        </div>
+      </section>
+
+      {/* Innovative Features Section */}
+      <section className="py-20 relative z-10 bg-white/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">前沿创新</h2>
+            <p className="text-lg text-gray-600">突破性的 AI 协作与记忆能力</p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Multi-Agent Platform */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white p-8 md:p-12 shadow-xl cursor-pointer"
+              onClick={() => navigate('/multi-agent')}
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16 transform group-hover:scale-110 transition-transform duration-700" />
+              <div className="relative z-10">
+                <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-6 group-hover:bg-white/30 transition-colors">
+                  <Layers className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-2xl font-bold mb-4">综合对话平台</h3>
+                <p className="text-blue-100 mb-8 leading-relaxed text-lg">
+                  智能意图识别与任务调度引擎。系统会自动分析您的需求，调度最合适的专家智能体协同工作，为您提供一站式的复杂问题解决方案。
+                </p>
+                <div className="flex items-center text-white font-medium group-hover:translate-x-2 transition-transform">
+                  立即体验 <ArrowRight className="w-5 h-5 ml-2" />
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Memory Mechanism */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-purple-500 to-pink-600 text-white p-8 md:p-12 shadow-xl cursor-pointer"
+              onClick={() => navigate(user ? '/memory-center' : '/login')}
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16 transform group-hover:scale-110 transition-transform duration-700" />
+              <div className="relative z-10">
+                <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-6 group-hover:bg-white/30 transition-colors">
+                  <Brain className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-2xl font-bold mb-4">长期记忆进化</h3>
+                <p className="text-purple-100 mb-8 leading-relaxed text-lg">
+                  具备成长性的记忆中枢。自动沉淀对话精华，构建您的专属知识图谱。随着使用时间的增加，AI 将越发了解您的偏好与习惯。
+                </p>
+                <div className="flex items-center text-white font-medium group-hover:translate-x-2 transition-transform">
+                  探索记忆 <ArrowRight className="w-5 h-5 ml-2" />
+                </div>
+              </div>
+            </motion.div>
+          </div>
         </div>
       </section>
 
