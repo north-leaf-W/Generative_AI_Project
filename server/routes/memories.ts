@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabase.js';
+import { consolidateMemories, executeConsolidation } from '../services/memory.js';
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ router.get('/', authenticateToken, async (req, res) => {
       .from('memories')
       .select('*')
       .eq('user_id', userId)
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -38,7 +40,8 @@ router.post('/', authenticateToken, async (req, res) => {
         user_id: userId,
         content,
         category: category || 'manual',
-        source: 'manual'
+        source: 'manual',
+        is_active: true
       })
       .select()
       .single();
@@ -100,5 +103,31 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+// 整理记忆 (预览/计划)
+router.post('/consolidate', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user!.id;
+        const result = await consolidateMemories(userId, false); // execute=false
+        res.json({ success: true, data: result });
+    } catch (error: any) {
+        console.error('Consolidate memories error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 执行整理计划
+router.post('/consolidate/execute', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user!.id;
+        const { deleteIds, newMemories } = req.body;
+        
+        await executeConsolidation(userId, deleteIds, newMemories);
+        res.json({ success: true });
+    } catch (error: any) {
+        console.error('Execute consolidation error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 export default router;

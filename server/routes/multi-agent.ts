@@ -2,7 +2,7 @@ import express from 'express';
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { routingGraph, getAgentSystemPrompt } from '../services/multiAgentGraph.js';
 import { createDashScopeModel, createStreamHandler, generateSessionTitle } from '../services/langchain.js';
-import { extractMemoryFromConversation } from '../services/memory.js';
+import { extractMemoryFromConversation, getUserMemories } from '../services/memory.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 
@@ -234,7 +234,13 @@ router.post('/chat', authenticateToken, async (req, res) => {
     const selectedAgentId = result.selectedAgentId;
     
     // 2. Get System Prompt
-    const systemPrompt = await getAgentSystemPrompt((selectedAgentId as string) || "DEFAULT");
+    let systemPrompt = await getAgentSystemPrompt((selectedAgentId as string) || "DEFAULT");
+
+    // Inject User Memories
+    const userMemories = await getUserMemories(userId);
+    if (userMemories) {
+        systemPrompt += userMemories;
+    }
 
     // 3. Create Model and Stream
     // 如果有图片，强制使用 VL 模型

@@ -6,7 +6,7 @@ import os from 'os';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { generateAIResponse, generateSessionTitle } from '../services/langchain.js';
-import { extractMemoryFromConversation } from '../services/memory.js';
+import { extractMemoryFromConversation, getUserMemories } from '../services/memory.js';
 import { extractTextFromFile } from '../utils/document-parser.js';
 import { ApiResponse, ChatRequest, Message } from '../../shared/types.js';
 
@@ -120,6 +120,12 @@ router.post('/stream', authenticateToken, async (req, res) => {
         // 可以考虑在日志或响应头中标记使用了调试配置
         console.log(`Using draft/pending prompt for agent ${agentId} (Owner Debug Mode)`);
       }
+    }
+
+    // 注入用户记忆到 System Prompt
+    const userMemories = await getUserMemories(userId);
+    if (userMemories) {
+        systemPrompt += userMemories;
     }
 
     // 获取历史消息用于上下文（排除刚刚插入的当前消息）

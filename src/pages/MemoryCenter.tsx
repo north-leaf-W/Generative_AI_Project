@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../stores/auth';
-import { Trash2, Plus, Brain, Calendar, Search, Edit2, X, Check, ChevronDown, AlertCircle } from 'lucide-react';
+import { Trash2, Plus, Brain, Calendar, Search, Edit2, X, Check, ChevronDown, AlertCircle, Sparkles, RefreshCw, ArrowRight } from 'lucide-react';
+import ConfirmationModal from '../components/ConfirmationModal';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Memory {
   id: string;
@@ -30,6 +32,14 @@ const MemoryCenter: React.FC = () => {
   const [editCategory, setEditCategory] = useState('general');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isConsolidating, setIsConsolidating] = useState(false);
+  const [isConsolidatingView, setIsConsolidatingView] = useState(false);
+  const [consolidationData, setConsolidationData] = useState<{
+    original: Memory[];
+    generated: { content: string; category: string }[];
+  } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const fetchMemories = async () => {
     // Check if we have cached memories
@@ -117,20 +127,26 @@ const MemoryCenter: React.FC = () => {
     }
   };
 
-  const handleDeleteMemory = async (id: string) => {
-    if (!confirm('确定要删除这条记忆吗？')) return;
+  const handleDeleteClick = (id: string) => {
+    setDeleteId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
     try {
-      await fetch(`/api/memories/${id}`, {
+      await fetch(`/api/memories/${deleteId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       setMemories(prev => {
-          const newMemories = prev.filter(m => m.id !== id);
+          const newMemories = prev.filter(m => m.id !== deleteId);
           localStorage.setItem('cachedMemories', JSON.stringify(newMemories));
           return newMemories;
       });
     } catch (e) {
       console.error('Delete memory failed', e);
+    } finally {
+        setDeleteId(null);
     }
   };
 
@@ -171,13 +187,207 @@ const MemoryCenter: React.FC = () => {
     }
   };
 
+  const handleConsolidateClick = () => {
+    if (memories.length < 2) {
+        alert('记忆条数过少，无需整理');
+        return;
+    }
+    setShowConfirmModal(true);
+  };
+
+  const startConsolidation = async () => {
+    setShowConfirmModal(false);
+    setIsConsolidatingView(true);
+    setIsConsolidating(true);
+    setConsolidationData(null);
+    setError(null);
+
+    try {
+        const res = await fetch('/api/memories/consolidate', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (data.data.preview) {
+                setConsolidationData(data.data);
+            } else {
+                // 如果没有需要整理的，直接提示并退出
+                setError('没有发现需要整理的记忆');
+                setTimeout(() => setIsConsolidatingView(false), 2000);
+            }
+        } else {
+            setError('整理失败：' + (data.error || '未知错误'));
+        }
+    } catch (e) {
+        console.error('Consolidate failed', e);
+        setError('请求失败，请检查网络');
+    } finally {
+        setIsConsolidating(false);
+    }
+  };
+
+  const applyConsolidation = async () => {
+      if (!consolidationData) return;
+      setIsSaving(true);
+      try {
+          const deleteIds = consolidationData.original.map(m => m.id);
+          const newMemories = consolidationData.generated;
+
+          await fetch('/api/memories/consolidate/execute', {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('token')}` 
+              },
+              body: JSON.stringify({ deleteIds, newMemories })
+          });
+
+          // Refresh
+          localStorage.removeItem('cachedMemories');
+          await fetchMemories();
+          setIsConsolidatingView(false);
+      } catch (e) {
+          console.error('Apply consolidation failed', e);
+          setError('应用更改失败，请重试');
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const updateGeneratedMemory = (index: number, content: string) => {
+      if (!consolidationData) return;
+      const newGenerated = [...consolidationData.generated];
+      newGenerated[index].content = content;
+      setConsolidationData({ ...consolidationData, generated: newGenerated });
+  };
+
   const filteredMemories = memories.filter(m => 
     m.content.toLowerCase().includes(searchTerm.toLowerCase()) || 
     m.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
-    <div className="flex-1 bg-gray-50 h-full overflow-y-auto p-8">
+    <div className="flex-1 bg-gray-50 h-full overflow-y-auto p-8 relative">
+      <AnimatePresence>
+        {isConsolidatingView && (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-white/95 backdrop-blur-xl z-50 flex flex-col p-8 overflow-y-auto"
+                style={{ overflowY: 'overlay' } as any}
+            >
+                <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col">
+                    <div className="flex items-center justify-between mb-8">
+                        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                            <Sparkles className="w-6 h-6 text-indigo-600" />
+                            记忆智能整理
+                        </h2>
+                        {!isConsolidating && (
+                            <div className="flex gap-3">
+                                <button 
+                                    onClick={() => setIsConsolidatingView(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                                >
+                                    取消
+                                </button>
+                                <button 
+                                    onClick={applyConsolidation}
+                                    disabled={isSaving}
+                                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 shadow-lg shadow-indigo-200"
+                                >
+                                    {isSaving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>}
+                                    确认应用
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {isConsolidating ? (
+                        <div className="flex-1 flex flex-col items-center justify-center">
+                            <div className="relative w-24 h-24 mb-8">
+                                <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
+                                <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+                                <Sparkles className="absolute inset-0 m-auto w-10 h-10 text-indigo-600 animate-pulse" />
+                            </div>
+                            <h3 className="text-xl font-medium text-gray-900 mb-2">正在分析您的记忆库...</h3>
+                            <p className="text-gray-500">AI 正在寻找重复项、合并碎片并优化表达</p>
+                        </div>
+                    ) : consolidationData ? (
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8 min-h-0">
+                            {/* Original */}
+                            <div className="flex flex-col gap-4">
+                                <div className="flex items-center gap-2 text-gray-500 font-medium px-2">
+                                    <div className="w-2 h-2 rounded-full bg-red-400"></div>
+                                    整理前 (将被删除)
+                                </div>
+                                <div className="flex-1 bg-red-50/50 rounded-2xl p-6 border border-red-100 overflow-y-auto space-y-4">
+                                    {consolidationData.original.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                            <p>没有需要删除的旧记忆</p>
+                                        </div>
+                                    ) : (
+                                        consolidationData.original.map(m => (
+                                            <div key={m.id} className="bg-white p-4 rounded-xl border border-red-100 shadow-sm opacity-80">
+                                                <div className="text-sm text-red-400 mb-1 flex items-center gap-2">
+                                                    <Trash2 className="w-3 h-3" />
+                                                    {CATEGORIES.find(c => c.value === m.category)?.label || m.category}
+                                                </div>
+                                                <p className="text-gray-600 line-through decoration-red-200">{m.content}</p>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Arrow */}
+                            <div className="hidden md:flex flex-col justify-center items-center absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                                <div className="w-12 h-12 bg-white rounded-full shadow-lg border border-indigo-100 flex items-center justify-center">
+                                    <ArrowRight className="w-6 h-6 text-indigo-600" />
+                                </div>
+                            </div>
+
+                            {/* Generated */}
+                            <div className="flex flex-col gap-4">
+                                <div className="flex items-center gap-2 text-indigo-600 font-medium px-2">
+                                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+                                    整理后 (建议新增)
+                                </div>
+                                <div className="flex-1 bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 overflow-y-auto space-y-4">
+                                    {consolidationData.generated.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                            <p>没有生成新的记忆，仅删除了冗余项。</p>
+                                        </div>
+                                    ) : (
+                                        consolidationData.generated.map((m, idx) => (
+                                            <div key={idx} className="bg-white p-4 rounded-xl border border-indigo-200 shadow-md ring-1 ring-indigo-500/10">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                                                        {CATEGORIES.find(c => c.value === m.category)?.label || m.category}
+                                                    </div>
+                                                    <Edit2 className="w-3 h-3 text-indigo-300" />
+                                                </div>
+                                                <textarea
+                                                    value={m.content}
+                                                    onChange={(e) => updateGeneratedMemory(idx, e.target.value)}
+                                                    className="w-full bg-transparent border-none p-0 text-gray-800 font-medium resize-none focus:ring-0 leading-relaxed"
+                                                    rows={3}
+                                                />
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="text-center text-red-500 py-12">{error}</div>
+                    )}
+                </div>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -187,13 +397,23 @@ const MemoryCenter: React.FC = () => {
             </h1>
             <p className="text-gray-500 mt-1">管理 AI 记住的关于你的信息</p>
           </div>
-          <button
-            onClick={() => setIsAdding(true)}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            添加记忆
-          </button>
+          <div className="flex gap-3">
+             <button
+                onClick={handleConsolidateClick}
+                disabled={isConsolidating || isLoading || memories.length === 0}
+                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+             >
+                <Sparkles className="w-4 h-4" />
+                一键整理
+             </button>
+             <button
+                onClick={() => setIsAdding(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm shadow-indigo-200"
+             >
+                <Plus className="w-4 h-4" />
+                添加记忆
+             </button>
+          </div>
         </div>
 
         {/* Search & Stats */}
@@ -353,7 +573,7 @@ const MemoryCenter: React.FC = () => {
                             <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
-                            onClick={() => handleDeleteMemory(memory.id)}
+                            onClick={() => handleDeleteClick(memory.id)}
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             title="删除"
                         >
@@ -367,6 +587,27 @@ const MemoryCenter: React.FC = () => {
           </div>
         )}
       </div>
+      {/* Delete Confirm Modal */}
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+        title="删除记忆"
+        message="确定要删除这条记忆吗？此操作无法撤销。"
+        type="danger"
+        confirmText="删除"
+      />
+
+      {/* Consolidate Confirm Modal */}
+      <ConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={startConsolidation}
+        title="整理所有记忆"
+        message="AI 将自动合并重复项并删除冗余信息。整理完成后，您将有机会预览并确认更改。"
+        type="info"
+        confirmText="开始整理"
+      />
     </div>
   );
 };
