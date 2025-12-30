@@ -33,3 +33,6 @@ supabase/.temp/
 # RAG Documents
 documents/source/*
 !documents/source/.gitkeep
+
+# Docs
+技术答辩逐字稿.md
