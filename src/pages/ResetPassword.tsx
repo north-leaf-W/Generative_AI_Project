@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Lock, MessageSquare, ArrowRight, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
+import { supabase } from '@/lib/utils'; // Import supabase client
 
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -15,27 +16,47 @@ const ResetPassword: React.FC = () => {
   const [localError, setLocalError] = useState('');
 
   useEffect(() => {
-    // 从 URL hash 中提取 access_token
-    const hash = location.hash;
-    if (hash) {
-      const params = new URLSearchParams(hash.substring(1)); // 去掉 #
-      const token = params.get('access_token');
-      if (token) {
-        setAccessToken(token);
-      } else {
-        setLocalError('无效的重置链接：缺少令牌');
-      }
-    } else {
-      // 有时候 Supabase 会将参数作为 query string 传递（取决于配置）
-      const params = new URLSearchParams(location.search);
-      const token = params.get('access_token');
-      if (token) {
-        setAccessToken(token);
-      } else {
-        setLocalError('无效的重置链接');
-      }
-    }
-    clearError();
+    const handleAuth = async () => {
+        // 优先从 query string 获取 (PKCE flow)
+        const searchParams = new URLSearchParams(location.search);
+        let token = searchParams.get('access_token');
+        let type = searchParams.get('type');
+        let error = searchParams.get('error');
+        let error_description = searchParams.get('error_description');
+
+        if (error) {
+            setLocalError(error_description || '验证链接无效');
+            return;
+        }
+        
+        // 如果 query string 没有，尝试从 hash 获取 (Implicit flow)
+        if (!token) {
+            const hash = location.hash;
+            if (hash) {
+                const hashParams = new URLSearchParams(hash.substring(1)); // 去掉 #
+                token = hashParams.get('access_token');
+                type = hashParams.get('type');
+            }
+        }
+
+        // 如果没有 token，但有 code (PKCE flow)，需要等待 Supabase 自动处理 session
+        if (!token) {
+             const { data: { session }, error } = await supabase.auth.getSession();
+             if (session?.access_token) {
+                 token = session.access_token;
+             }
+        }
+
+        if (token) {
+          setAccessToken(token);
+        } else {
+          setLocalError('无效的重置链接或链接已过期');
+          console.log('Current URL:', window.location.href);
+        }
+        clearError();
+    };
+
+    handleAuth();
   }, [location, clearError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
