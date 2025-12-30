@@ -308,8 +308,12 @@ const Chat: React.FC = () => {
 
     if (!targetSessionId) {
       // 只要没有选中当前会话，发送消息时就自动创建新会话
+      setPendingNew(true); // 标记为新会话，防止 useEffect 触发 fetchMessages 覆盖本地乐观更新的消息
       const newSession = await createSession(agentId, `新的对话`, mode);
-      if (!newSession) return;
+      if (!newSession) {
+        setPendingNew(false); // 创建失败，重置状态
+        return;
+      }
       setCurrentSession(newSession);
       // Update Cache
       const currentSessions = useChatStore.getState().sessions;
@@ -321,6 +325,9 @@ const Chat: React.FC = () => {
     }
 
     if (!targetSessionId) return;
+    
+    // 标记是否是新创建的会话，用于后续决定是否刷新列表获取标题
+    const isNewSession = !currentSession || currentSession.id !== targetSessionId;
 
     const message = inputMessage.trim();
     // 构造最终消息内容，包含附件文本
@@ -371,16 +378,16 @@ const Chat: React.FC = () => {
       
       // 发送消息完成后，重新获取一次会话列表，以确保标题更新（如果是第一次对话）
       // 延迟一点时间，给后端生成标题留出余地
-      if (targetSessionId === currentSession?.id && messages.length === 0) {
+      if (isNewSession) {
         setTimeout(() => {
           fetchSessions(agentId, mode).then(() => {
              const currentSessions = useChatStore.getState().sessions;
              localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));
           });
         }, 2000);
-      } else if (targetSessionId && messages.length === 0) {
-         // 新建会话的情况
-         setTimeout(() => {
+      } else if (targetSessionId === currentSession?.id && messages.length === 0) {
+        // 兜底：如果当前看起来像是一个空会话（虽然理论上发完消息不应该空），也刷新一下
+        setTimeout(() => {
           fetchSessions(agentId, mode).then(() => {
              const currentSessions = useChatStore.getState().sessions;
              localStorage.setItem(`cachedSessions_${agentId}_${mode}`, JSON.stringify(currentSessions));

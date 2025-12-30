@@ -25,10 +25,10 @@ const Sidebar: React.FC = () => {
   const menuItems: MenuItem[] = [
     { icon: LayoutDashboard, label: '首页', path: '/' },
     { icon: Globe, label: '智能体广场', path: '/square' },
-    { icon: Layers, label: '综合对话平台', path: '/multi-agent' },
   ];
 
   if (user) {
+    menuItems.push({ icon: Layers, label: '综合对话平台', path: '/multi-agent' });
     menuItems.push({ icon: Bot, label: '我的智能体', path: '/agents/my' });
     menuItems.push({ icon: Brain, label: '记忆中心', path: '/memory-center' });
     menuItems.push({ icon: Bell, label: '消息中心', path: '/messages', badge: unreadCount });
