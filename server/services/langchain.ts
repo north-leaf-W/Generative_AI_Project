@@ -166,7 +166,8 @@ export const generateAIResponse = async (
   res: Response,
   enableWebSearch: boolean = false,
   enableRAG: boolean = false,
-  images?: string[]
+  images?: string[],
+  filesContent?: string
 ) : Promise<string> => {
   try {
     // 如果有图片，强制使用多模态模型 (例如 qwen-vl-max 或 qwen-vl-plus)
@@ -185,7 +186,7 @@ export const generateAIResponse = async (
     const streamHandler = createStreamHandler(res, append, resolveFn);
 
     // 处理上下文 (Web Search & RAG)
-    let finalMessage: string | any[] = message;
+    // message 是用户的原始问题，用于搜索
     let contextParts: string[] = [];
     
     // Web Search
@@ -206,7 +207,7 @@ export const generateAIResponse = async (
           if (searchResult) {
             console.log('Search results found');
             const searchContent = typeof searchResult === 'string' ? searchResult : JSON.stringify(searchResult, null, 2);
-            contextParts.push(`【互联网搜索结果】:\n${searchContent}`);
+            contextParts.push(`### 互联网搜索结果\n${searchContent}`);
           }
         }
       } catch (error) {
@@ -223,7 +224,7 @@ export const generateAIResponse = async (
         if (docs && docs.length > 0) {
           console.log(`Found ${docs.length} relevant documents`);
           const contextText = docs.map((doc: any) => `[Source: ${doc.metadata?.source || 'Unknown'}]\n${doc.content}`).join('\n\n---\n\n');
-          contextParts.push(`【知识库检索结果】:\n${contextText}`);
+          contextParts.push(`### 知识库检索结果\n${contextText}`);
         } else {
           console.log('No relevant documents found in knowledge base');
         }
@@ -232,18 +233,36 @@ export const generateAIResponse = async (
       }
     }
 
-    // 如果有上下文信息，构建最终的 Prompt 文本
-    let contextPrompt = '';
-    if (contextParts.length > 0) {
-      contextPrompt = `请基于以下提供的上下文信息回答用户的问题。
-上下文可能包含来自互联网的搜索结果和本地知识库的检索内容。
-如果上下文不包含答案，请说明你不知道，不要编造。
+    // 如果有附件内容，也加入上下文
+    if (filesContent) {
+        contextParts.push(`### 用户上传的附件内容\n${filesContent}`);
+    }
 
+    // 构建最终的 Prompt
+    let finalMessage: string | any[] = message;
+    let contextPrompt = '';
+    
+    if (contextParts.length > 0) {
+      // 动态构建来源说明，避免误导
+      const sources: string[] = [];
+      if (filesContent) sources.push('用户上传的附件内容');
+      if (enableWebSearch) sources.push('互联网搜索结果');
+      if (enableRAG) sources.push('本地知识库的检索内容');
+
+      contextPrompt = `请基于以下提供的参考资料回答用户的问题。
+这些参考资料可能包含：${sources.join('、')}。
+
+请严格遵循以下规则：
+1. **明确来源**：回答时，请明确指出信息是来自“附件”、“互联网搜索”还是“知识库”。${enableRAG ? '' : '（注意：本对话未启用知识库，请勿提及“知识库”）'}
+2. **区分内容**：如果附件中只包含很少的信息（如仅有一个日期），请不要编造该附件包含其他详细信息。
+3. **如实回答**：如果附件内容与用户问题不直接相关，或者附件信息不足，请如实说明，并尝试利用其他参考资料（如搜索结果）来补充回答。
+
+---
 ${contextParts.join('\n\n====================\n\n')}
+---
 
 用户问题:
 `;
-      // 注意：这里我们只是准备了前缀，实际组合在下面
     }
 
     // 构建消息内容

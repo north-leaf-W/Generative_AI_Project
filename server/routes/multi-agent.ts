@@ -190,47 +190,38 @@ router.post('/chat', authenticateToken, async (req, res) => {
     // 准备发送给模型的消息
     let processedMessages = [...messages];
     
-    // 处理最后一条消息，附加文件内容
+    // 处理最后一条消息
     const lastMessageIndex = processedMessages.length - 1;
-    let lastContent = processedMessages[lastMessageIndex].content;
-
-    // 如果有文件，附加到内容中
-    if (files && files.length > 0) {
-      const filesContent = files.map((f: any) => `\n\n【附件：${f.name}】\n${f.content}\n\n`).join('');
-      lastContent = (lastContent + filesContent).trim();
-    }
+    const originalLastContent = processedMessages[lastMessageIndex].content;
     
-    // 如果只有附件没有文字
-    if (!lastContent && (images?.length || files?.length)) {
-      lastContent = '请分析上传的内容。';
+    // 准备附件内容
+    let filesContent = '';
+    if (files && files.length > 0) {
+      filesContent = files.map((f: any) => `\n\n【附件：${f.name}】\n${f.content}\n\n`).join('');
     }
 
-    // 构造 LangChain 消息对象
-    const langchainMessages = processedMessages.map((msg: any, index: number) => {
+    // 1. 构造用于路由的消息 (包含附件内容，以便路由助手了解上下文)
+    let routingLastContent = originalLastContent;
+    if (filesContent) {
+      routingLastContent = (routingLastContent + filesContent).trim();
+    }
+    // 如果只有附件没有文字
+    if (!routingLastContent && (images?.length || files?.length)) {
+      routingLastContent = '请分析上传的内容。';
+    }
+
+    const routingMessages = processedMessages.map((msg: any, index: number) => {
       let content = msg.content;
       if (index === lastMessageIndex) {
-        content = lastContent;
-        
-        // 如果有图片，且是最后一条消息，构造多模态消息
-        if (images && images.length > 0) {
-           const contentParts: any[] = [{ type: 'text', text: content }];
-           images.forEach((img: string) => {
-             contentParts.push({
-               type: 'image_url',
-               image_url: { url: img }
-             });
-           });
-           return new HumanMessage({ content: contentParts });
-        }
+        content = routingLastContent;
       }
-      
       if (msg.role === 'user') return new HumanMessage(content);
       if (msg.role === 'assistant') return new AIMessage(content);
-      return new HumanMessage(content); // Default
+      return new HumanMessage(content); 
     });
 
     // 1. Run Routing Graph to select agent
-    const result = await routingGraph.invoke({ messages: langchainMessages });
+    const result = await routingGraph.invoke({ messages: routingMessages });
     const selectedAgentId = result.selectedAgentId;
     
     // 2. Get System Prompt
@@ -240,6 +231,20 @@ router.post('/chat', authenticateToken, async (req, res) => {
     const userMemories = await getUserMemories(userId);
     if (userMemories) {
         systemPrompt += userMemories;
+    }
+
+    // Inject Files Content into System Prompt (so User Message stays clean for search)
+    if (filesContent) {
+        systemPrompt += `\n\n【附件内容】\n${filesContent}\n\n重要指令：
+1. **优先分析附件**：首先解析附件内容。
+2. **主动搜索补充**：如果用户的问题涉及附件中的实体（如日期、事件、人物），但附件本身信息不足（例如只提供了一个日期），且你具备联网搜索能力，请务必**主动**以附件中的关键信息为关键词进行联网搜索，以获取更详细的背景信息，而不要仅仅回答“附件没说”。
+3. **准确标注来源**：
+   - 引用附件内容时，请标注“来源：附件”。
+   - 引用联网搜索结果时，请标注“来源：互联网搜索”。
+   - **严禁**使用“知识库”一词，除非你确实访问了特定的本地知识库系统。对于通过网络检索到的信息，一律称为“互联网搜索结果”。`;
+    } else {
+        // 即使没有附件，也提醒一下来源标注规范
+        systemPrompt += `\n\n注意：如果使用了联网搜索，请标注来源为“互联网搜索”，严禁称为“知识库”。`;
     }
 
     // 3. Create Model and Stream
@@ -266,6 +271,38 @@ router.post('/chat', authenticateToken, async (req, res) => {
         agentAvatar = agent.avatar_url;
       }
     }
+
+    // 构造最终发送给模型的消息 (User Message 保持原始问题，利于触发搜索)
+    let finalModelLastContent = originalLastContent;
+    if (!finalModelLastContent) {
+       // 如果用户没输入文字，给一个默认提示
+       finalModelLastContent = filesContent ? '请根据附件内容回答。' : '请分析上传的内容。';
+    }
+    // 关键修复：不要人为在 User Message 中添加 "请使用搜索引擎" 这种诱导性的话，
+    // 因为这会干扰模型的搜索意图判断（尤其是对于 Qwen 模型）。
+    // 同时，不要把 fileContent 再次加到 user message 里，因为上面已经加到 system prompt 了。
+    // 只需要保持用户的原始问题即可。如果开启了 enable_search，模型会自动判断是否需要搜索。
+
+    const finalModelMessages = processedMessages.map((msg: any, index: number) => {
+        let content = msg.content;
+        if (index === lastMessageIndex) {
+            content = finalModelLastContent;
+            // 如果有图片，且是最后一条消息，构造多模态消息
+            if (images && images.length > 0) {
+               const contentParts: any[] = [{ type: 'text', text: content }];
+               images.forEach((img: string) => {
+                 contentParts.push({
+                   type: 'image_url',
+                   image_url: { url: img }
+                 });
+               });
+               return new HumanMessage({ content: contentParts });
+            }
+        }
+        if (msg.role === 'user') return new HumanMessage(content);
+        if (msg.role === 'assistant') return new AIMessage(content);
+        return new HumanMessage(content);
+    });
 
     // 准备保存 AI 回复
     let fullResponse = "";
@@ -311,13 +348,13 @@ router.post('/chat', authenticateToken, async (req, res) => {
               
               // 异步提取记忆
               if (fullResponse && fullResponse.trim()) {
-                  extractMemoryFromConversation(userId, lastContent, fullResponse.trim(), 'multi-agent');
+                  extractMemoryFromConversation(userId, originalLastContent, fullResponse.trim(), 'multi-agent');
               }
 
               // Auto-generate title if it's the first message
               if (messages.length === 1) {
                   console.log('Auto-generating title for session:', sessionId);
-                  generateSessionTitle(lastContent, fullResponse).then(async (newTitle) => {
+                  generateSessionTitle(originalLastContent, fullResponse).then(async (newTitle) => {
                       console.log('Generated title:', newTitle);
                       if (newTitle && newTitle !== '新的对话') {
                           await supabaseAdmin
@@ -336,7 +373,7 @@ router.post('/chat', authenticateToken, async (req, res) => {
 
     const stream = await model.stream([
       new SystemMessage(systemPrompt),
-      ...langchainMessages
+      ...finalModelMessages
     ]);
 
     for await (const chunk of stream) {
