@@ -152,17 +152,17 @@ router.post('/stream', authenticateToken, async (req, res) => {
     // 构造 Prompt 上下文
     // 如果有文件内容，拼接到 Prompt 中
     // 注意：这里修改 finalMessage 仅用于发送给 AI，不影响数据库中存储的原始 message
-    let filesContent = '';
+    let finalMessage = message;
     if (files && files.length > 0) {
-       filesContent = files.map(f => `\n\n【附件：${f.name}】\n${f.content}\n\n`).join('');
+       const filesContent = files.map(f => `\n\n【附件：${f.name}】\n${f.content}\n\n`).join('');
+       finalMessage = (finalMessage + filesContent).trim();
     }
     // 如果只有图片/文件没有文字，给一个默认提示 (用于 AI 理解，如果它不支持空内容)
-    let finalMessage = message;
     if (!finalMessage && (images?.length || files?.length)) {
        finalMessage = '请分析上传的内容。';
     }
 
-    const aiResponse = await generateAIResponse(finalMessage, systemPrompt, messageHistory, res, webSearch, enableRAG, images, filesContent);
+    const aiResponse = await generateAIResponse(finalMessage, systemPrompt, messageHistory, res, webSearch, enableRAG, images);
 
     try {
       if (aiResponse && aiResponse.trim()) {

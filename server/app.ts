@@ -49,7 +49,7 @@ app.use('/api/memories', memoryRoutes)
  * health
  */
 app.use(
-  ['/api/health', '/api'],
+  '/api/health',
   (req: Request, res: Response, next: NextFunction): void => {
     res.status(200).json({
       success: true,
